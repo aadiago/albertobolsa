@@ -8,37 +8,23 @@ from scipy.interpolate import make_interp_spline
 import base64
 import os
 
-# --- 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS CSS ---
+# --- 1. CONFIGURACIÓN ---
 st.set_page_config(layout="wide", page_title="RRG Pro Mobile", page_icon="🐧")
 
-# CSS REFORZADO PARA CENTRAR TODO (Headers, Celdas y Números)
+# CSS: Centrado agresivo y ajustes visuales
 st.markdown("""
     <style>
-    /* 1. Centrar Encabezados */
     div[data-testid="stDataFrame"] div[role="columnheader"] {
-        justify-content: center !important;
-        text-align: center !important;
+        justify-content: center !important; text-align: center !important;
     }
-
-    /* 2. Centrar Celdas (incluye texto y números) */
     div[data-testid="stDataFrame"] div[role="gridcell"] {
-        justify-content: center !important;
-        text-align: center !important;
-        display: flex !important;
+        justify-content: center !important; text-align: center !important; display: flex !important;
     }
-
-    /* 3. Centrar contenido interno de las celdas (divs internos) */
     div[data-testid="stDataFrame"] div[role="gridcell"] > div {
-        justify-content: center !important;
-        text-align: center !important;
-        margin: auto !important;
+        justify-content: center !important; text-align: center !important; margin: auto !important;
     }
-
-    /* 4. Centrar imágenes específicamente */
     div[data-testid="stDataFrame"] td img {
-        display: block;
-        margin-left: auto;
-        margin-right: auto;
+        display: block; margin-left: auto; margin-right: auto;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -52,13 +38,11 @@ OFFSET_2W = -2
 OFFSET_3W = -3
 OFFSET_4W = -4
 
-# TU CARTERA
 MY_PORTFOLIO = [
     "QDVF.DE", "ZPRX.DE", "XDWI.DE",
     "SPYU.DE", "XDWM.DE", "CEMS.DE"
 ]
 
-# MAPA DE IMÁGENES
 IMG_PATHS = {
     "PENGUIN": "penguin.png", "PIRANHA": "PIRANHA.png",
     "USA": "usa.png", "EUR": "eur.png", "WRL": "wrl.png", "EME": "eme.png",
@@ -81,7 +65,6 @@ SECTOR_IMG_MAP = {
     "INDICE": "SEC_IDX", "MSCI WORLD EW": "SEC_IDX"
 }
 
-# LISTA DE ACTIVOS
 ASSETS = [
     ("CASH", "EUR", "YCSH.DE"),
     ("MSCI WORLD EW", "WRL", "MWEQ.DE"),
@@ -111,46 +94,38 @@ ASSETS = [
 ]
 
 
-# --- 3. FUNCIONES AUXILIARES ---
+# --- 3. CÁLCULOS ---
 
 def get_image_base64(path):
-    """Convierte imagen a base64. Retorna None si no existe."""
-    if not os.path.exists(path):
-        return None
-    with open(path, "rb") as f:
-        data = f.read()
+    if not os.path.exists(path): return None
+    with open(path, "rb") as f: data = f.read()
     return "data:image/png;base64," + base64.b64encode(data).decode()
 
 
 def calculate_rrg_zscore(p_ticker, p_bench, offset):
     try:
         df = pd.DataFrame({'t': p_ticker, 'b': p_bench}).dropna()
-        min_req = RRG_PERIOD_TREND + abs(offset) + 2
-        if len(df) < min_req: return ("Error", 0.0, 0.0)
+        if len(df) < (RRG_PERIOD_TREND + abs(offset) + 2): return ("Error", 0.0, 0.0)
 
-        rs_series = (df['t'] / df['b']) * 100
-        rs_cut = rs_series if offset == 0 else rs_series.iloc[:offset]
+        rs = (df['t'] / df['b']) * 100
+        rs_cut = rs if offset == 0 else rs.iloc[:offset]
 
-        mean_long = rs_cut.rolling(window=RRG_PERIOD_TREND).mean().iloc[-1]
-        std_long = rs_cut.rolling(window=RRG_PERIOD_TREND).std().iloc[-1]
-        current_rs = rs_cut.iloc[-1]
-        if std_long == 0: std_long = 1
-        strength_x = ((current_rs - mean_long) / std_long) * 10
+        mean_l, std_l = rs_cut.rolling(RRG_PERIOD_TREND).mean().iloc[-1], rs_cut.rolling(RRG_PERIOD_TREND).std().iloc[
+            -1]
+        mean_s, std_s = rs_cut.rolling(RRG_PERIOD_MOM).mean().iloc[-1], rs_cut.rolling(RRG_PERIOD_MOM).std().iloc[-1]
 
-        mean_short = rs_cut.rolling(window=RRG_PERIOD_MOM).mean().iloc[-1]
-        std_short = rs_cut.rolling(window=RRG_PERIOD_MOM).std().iloc[-1]
-        if std_short == 0: std_short = 1
-        momentum_y = ((current_rs - mean_short) / std_short) * 10
+        sx = ((rs_cut.iloc[-1] - mean_l) / (std_l if std_l else 1)) * 10
+        my = ((rs_cut.iloc[-1] - mean_s) / (std_s if std_s else 1)) * 10
 
         label = "Improving"
-        if strength_x >= 0 and momentum_y >= 0:
+        if sx >= 0 and my >= 0:
             label = "Leading"
-        elif strength_x >= 0 and momentum_y < 0:
+        elif sx >= 0 and my < 0:
             label = "Weakening"
-        elif strength_x < 0 and momentum_y < 0:
+        elif sx < 0 and my < 0:
             label = "Lagging"
 
-        return (label, float(strength_x), float(momentum_y))
+        return (label, float(sx), float(my))
     except:
         return ("Error", 0.0, 0.0)
 
@@ -158,132 +133,115 @@ def calculate_rrg_zscore(p_ticker, p_bench, offset):
 @st.cache_data(ttl=3600)
 def load_data_and_history():
     try:
-        bench_obj = yf.Ticker(BENCHMARK)
-        bench_hist = bench_obj.history(period="2y")
-        if bench_hist.empty: return pd.DataFrame(), {}
-        bench_series = bench_hist['Close'].resample('W-FRI').last().dropna().tz_localize(None)
+        bench = yf.Ticker(BENCHMARK).history(period="2y")['Close'].resample('W-FRI').last().dropna().tz_localize(None)
     except:
         return pd.DataFrame(), {}
 
-    rows = []
-    history_dict = {}
+    rows, history_dict = [], {}
+    cached_imgs = {k: get_image_base64(v) for k, v in IMG_PATHS.items()}
 
-    # Pre-cargar imágenes
-    cached_images = {}
-    for k, v in IMG_PATHS.items():
-        cached_images[k] = get_image_base64(v)
-
-    progress_text = "Analizando mercado..."
-    my_bar = st.progress(0, text=progress_text)
+    bar = st.progress(0, text="Analizando...")
     total = len(ASSETS)
 
-    for i, (sector, region, ticker) in enumerate(ASSETS):
-        my_bar.progress((i + 1) / total, text=f"Procesando {ticker}...")
+    for i, (sec, reg, tick) in enumerate(ASSETS):
+        bar.progress((i + 1) / total, text=f"{tick}...")
         try:
-            t_obj = yf.Ticker(ticker)
-            t_hist = t_obj.history(period="2y")
-            if t_hist.empty: continue
+            hist = yf.Ticker(tick).history(period="2y")['Close']
+            if hist.empty: continue
 
-            try:
-                daily_close = t_hist['Close']
-                d_curr, d_prev = float(daily_close.iloc[-1]), float(daily_close.iloc[-2])
-                change_daily_pct = ((d_curr / d_prev) - 1) * 100
-            except:
-                change_daily_pct = 0.0
+            # Precios
+            d_curr, d_prev = float(hist.iloc[-1]), float(hist.iloc[-2])
+            day_pct = ((d_curr / d_prev) - 1) * 100
 
-            t_series = t_hist['Close'].resample('W-FRI').last().dropna().tz_localize(None)
-            try:
-                curr = float(t_series.iloc[-1])
-                prev_3m = float(t_series.iloc[-14]) if len(t_series) >= 14 else curr
-                change_3m = ((curr / prev_3m) - 1) * 100
-            except:
-                change_3m = 0.0
+            w_series = hist.resample('W-FRI').last().dropna().tz_localize(None)
+            w_curr = float(w_series.iloc[-1])
+            w_prev3m = float(w_series.iloc[-14]) if len(w_series) >= 14 else w_curr
+            m3_pct = ((w_curr / w_prev3m) - 1) * 100
 
-            rrg_data = []
-            for off in [0, OFFSET_1W, OFFSET_2W, OFFSET_3W, OFFSET_4W]:
-                rrg_data.append(calculate_rrg_zscore(t_series, bench_series, off))
+            # RRG Data: [Hoy, 1W, 2W, 3W, 4W]
+            rrg_data = [calculate_rrg_zscore(w_series, bench, o) for o in
+                        [0, OFFSET_1W, OFFSET_2W, OFFSET_3W, OFFSET_4W]]
+            history_dict[tick] = rrg_data
 
-            history_dict[ticker] = rrg_data
+            # --- CORRECCIÓN MATEMÁTICA DE LA NOTA ---
+            # 1. Obtenemos nota pura de cada semana
+            raw_scores = [5.0 + (d[1] * 0.12 + d[2] * 0.04) if d[0] != "Error" else 0.0 for d in rrg_data]
 
-            def get_score(rd):
-                return 5.0 + (rd[1] * 0.12) + (rd[2] * 0.04) if rd[0] != "Error" else 0.0
+            # 2. Invertimos para que coincida con los pesos (Viejo -> Nuevo)
+            # raw_scores original: [Hoy, 1W, 2W, 3W, 4W]
+            # ordered_scores:      [4W, 3W, 2W, 1W, Hoy]
+            ordered_scores = raw_scores[::-1]
 
-            scores = [get_score(rrg_data[4]), get_score(rrg_data[3]), get_score(rrg_data[2]), get_score(rrg_data[1]),
-                      get_score(rrg_data[0])]
+            # 3. Media Ponderada (0.05 para 4W ... 0.45 para Hoy)
             weights = [0.05, 0.10, 0.15, 0.25, 0.45]
-            weighted_avg = np.average(scores, weights=weights)
+            final_sc = np.average(ordered_scores, weights=weights)
+
+            # 4. Bonus Consistencia (Si mejora respecto a la semana anterior)
             bonus = 0.0
             for k in range(1, 5):
-                if scores[k] > scores[k - 1]: bonus += 0.2
-            final_score = max(0.0, min(10.0, weighted_avg + bonus))
+                if ordered_scores[k] > ordered_scores[k - 1]: bonus += 0.2
 
-            # ICONOS (VACÍO "" SI ES NONE)
-            img_sec_key = SECTOR_IMG_MAP.get(sector, "")
-            icon_sector = cached_images.get(img_sec_key)
-            if icon_sector is None: icon_sector = ""
+            final_sc = max(0.0, min(10.0, final_sc + bonus))
+            # ---------------------------------------------
 
-            icon_region = cached_images.get(region)
-            if icon_region is None: icon_region = ""
+            # Iconos
+            is_sec = cached_imgs.get(SECTOR_IMG_MAP.get(sec, "")) or ""
+            is_reg = cached_imgs.get(reg) or ""
+            is_pro = ""
+            if tick in MY_PORTFOLIO:
+                is_pro = cached_imgs.get("PENGUIN") or ""
+            elif "INDICE" in sec or "WORLD" in sec:
+                is_pro = cached_imgs.get("PIRANHA") or ""
 
-            icon_profile = ""
-            if ticker in MY_PORTFOLIO:
-                res = cached_images.get("PENGUIN")
-                if res: icon_profile = res
-            elif sector == "INDICE" or sector == "MSCI WORLD EW":
-                res = cached_images.get("PIRANHA")
-                if res: icon_profile = res
+            # Emojis Color POS
+            pos_label = rrg_data[0][0]
+            pos_display = pos_label
+            if "Leading" in pos_label:
+                pos_display = "🟢 Lead"
+            elif "Weakening" in pos_label:
+                pos_display = "🟡 Weak"
+            elif "Lagging" in pos_label:
+                pos_display = "🔴 Lagg"
+            elif "Improving" in pos_label:
+                pos_display = "🔵 Impr"
 
-            is_selected = ticker in MY_PORTFOLIO
-
-            row = {
-                "Ver": is_selected,
-                "Img_S": icon_sector,
-                "Img_R": icon_region,
-                "Img_P": icon_profile,
-                "Ticker": ticker,
-                "Sector": sector,
-                "Region": region,
-                "Score": final_score,
-                "% Hoy": change_daily_pct,
-                "% 3M": change_3m,
-                "POS": rrg_data[0][0], "STR": rrg_data[0][1], "MOM": rrg_data[0][2],
-            }
-            rows.append(row)
-
+            rows.append({
+                "Ver": (tick in MY_PORTFOLIO),
+                "Img_S": is_sec, "Img_R": is_reg, "Img_P": is_pro,
+                "Ticker": tick, "Sector": sec, "Region": reg,
+                "Score": final_sc,
+                "% Hoy": day_pct, "% 3M": m3_pct,
+                "POS": pos_display,
+                "STR": rrg_data[0][1], "MOM": rrg_data[0][2]
+            })
         except:
             continue
 
-    my_bar.empty()
+    bar.empty()
     df = pd.DataFrame(rows)
-
     if not df.empty:
         df = df.sort_values(by="Score", ascending=False).reset_index(drop=True)
         df.insert(1, "#", range(1, len(df) + 1))
-
     return df, history_dict
 
 
-# --- 4. INTERFAZ PRINCIPAL ---
-
+# --- 4. INTERFAZ ---
 st.header("📊 RRG Pro Mobile")
-
-df, rrg_history = load_data_and_history()
+df, rrg_hist = load_data_and_history()
 
 if df.empty:
-    st.error("Error cargando datos. Verifica tu conexión o las imágenes .png.")
+    st.error("Error de datos.")
     st.stop()
 
-# --- TABLA EDITABLE ---
-st.caption("Marca 'Ver' para graficar. Datos centrados y ranking fijo.")
+st.caption("Marca 'Ver' para añadir/quitar del gráfico. Tu cartera está marcada por defecto.")
 
-column_config = {
+# Configuración Columnas
+col_conf = {
     "Ver": st.column_config.CheckboxColumn("Ver", width="small"),
     "#": st.column_config.NumberColumn("#", width="small", format="%d"),
-
     "Img_S": st.column_config.ImageColumn("Sec", width="small"),
     "Img_R": st.column_config.ImageColumn("Reg", width="small"),
     "Img_P": st.column_config.ImageColumn("👤", width="small"),
-
     "Score": st.column_config.NumberColumn("Nota", format="%.1f"),
     "% Hoy": st.column_config.NumberColumn("% Hoy", format="%.2f%%"),
     "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%"),
@@ -291,113 +249,89 @@ column_config = {
     "MOM": st.column_config.NumberColumn(format="%.2f"),
 }
 
-# Columnas visibles (Ticker está oculto en la vista, pero disponible en datos)
-# Nota: Si ocultas el Ticker, no sabrás qué activo es. Lo añadiré al final o puedes dejarlo.
-# Dejaré "Ticker" visible para que sepas qué es, pero la gráfica usará Sector+Region.
-cols_visible = ["Ver", "#", "Img_S", "Img_R", "Img_P", "Ticker", "Score", "% Hoy", "% 3M", "POS", "STR", "MOM"]
+visible_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "Ticker", "Score", "% Hoy", "% 3M", "POS", "STR", "MOM"]
 
+# TABLA EDITABLE
 edited_df = st.data_editor(
     df,
     use_container_width=True,
     hide_index=True,
-    column_order=cols_visible,
-    column_config=column_config,
-    disabled=["#", "Img_S", "Img_R", "Img_P", "Ticker", "Score", "% Hoy", "% 3M", "POS", "STR", "MOM"],
+    column_order=visible_cols,
+    column_config=col_conf,
+    disabled=[c for c in visible_cols if c != "Ver"],
     height=500
 )
 
 # --- GRÁFICA ---
-
-subset_to_plot = edited_df[edited_df["Ver"] == True]
-tickers_to_plot = subset_to_plot["Ticker"].tolist()
+plot_tickers = edited_df[edited_df["Ver"] == True]["Ticker"].tolist()
 
 st.divider()
-st.subheader(f"📈 Gráfico RRG ({len(tickers_to_plot)} activos)")
+st.subheader(f"📈 Gráfico RRG ({len(plot_tickers)} activos)")
 
-if not tickers_to_plot:
-    st.warning("Selecciona activos en la tabla de arriba.")
-else:
+if plot_tickers:
     fig, ax = plt.subplots(figsize=(10, 10))
-
-    all_x, all_y = [], []
     colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22',
               '#17becf']
+    all_x, all_y = [], []
 
-    for i, ticker in enumerate(tickers_to_plot):
-        rrg_data = rrg_history.get(ticker, [])
-        if not rrg_data: continue
+    for i, t in enumerate(plot_tickers):
+        raw = rrg_hist.get(t, [])
+        if not raw: continue
 
-        points = []
-        for k in [4, 3, 2, 1, 0]:
-            if rrg_data[k][0] != "Error":
-                points.append((rrg_data[k][1], rrg_data[k][2]))
-                all_x.append(rrg_data[k][1])
-                all_y.append(rrg_data[k][2])
+        pts = [(r[1], r[2]) for r in raw if r[0] != "Error"]
+        if len(pts) < 2: continue
 
-        if len(points) < 2: continue
+        # Ordenar cronológico para pintar traza: 4W -> Hoy
+        pts_chron = list(reversed(pts))
+        xs = np.array([p[0] for p in pts_chron])
+        ys = np.array([p[1] for p in pts_chron])
 
-        xs = np.array([p[0] for p in points])
-        ys = np.array([p[1] for p in points])
+        all_x.extend(xs)
+        all_y.extend(ys)
 
-        plot_x, plot_y = xs, ys
-        if len(points) >= 3:
+        # Spline
+        px, py = xs, ys
+        if len(xs) >= 3:
             try:
-                t_raw = np.arange(len(xs))
-                t_dense = np.linspace(0, len(xs) - 1, 100)
-                spl_x = make_interp_spline(t_raw, xs, k=2)
-                spl_y = make_interp_spline(t_raw, ys, k=2)
-                plot_x, plot_y = spl_x(t_dense), spl_y(t_dense)
+                tr = np.arange(len(xs))
+                td = np.linspace(0, len(xs) - 1, 100)
+                px = make_interp_spline(tr, xs, k=2)(td)
+                py = make_interp_spline(tr, ys, k=2)(td)
             except:
                 pass
 
-        col = colors[i % len(colors)]
+        c = colors[i % len(colors)]
+        ax.plot(px, py, color=c, lw=2, alpha=0.8)
+        ax.scatter(xs[:-1], ys[:-1], s=20, color=c, alpha=0.6)
 
-        # Plot Línea
-        ax.plot(plot_x, plot_y, color=col, linewidth=2, alpha=0.8)
-        ax.scatter(xs[:-1], ys[:-1], s=20, color=col, alpha=0.6)
+        # Cabeza
+        row_info = edited_df[edited_df['Ticker'] == t].iloc[0]
+        label = f" {row_info['Sector']} {row_info['Region']}"
+        fw, ec = 'normal', c
+        if t in MY_PORTFOLIO:
+            label = "🐧" + label
+            fw, ec = 'bold', 'black'
 
-        # --- ETIQUETADO PERSONALIZADO (NO TICKER) ---
-        # 1. Buscar la fila correspondiente en el dataframe editado
-        row_info = edited_df[edited_df['Ticker'] == ticker].iloc[0]
-
-        # 2. Extraer Sector y Región
-        sec_name = row_info['Sector']
-        reg_name = row_info['Region']
-
-        # 3. Crear texto: "UTILITIES USA"
-        label_text = f" {sec_name} {reg_name}"
-
-        # Estilo cabeza
-        edge_c = 'black' if ticker in MY_PORTFOLIO else col
-        ax.scatter(xs[-1], ys[-1], s=120, color=col, edgecolors=edge_c, zorder=5)
-
-        # Estilo texto
-        font_w = 'bold' if ticker in MY_PORTFOLIO else 'normal'
-        if ticker in MY_PORTFOLIO: label_text = "🐧" + label_text
-
-        ax.text(xs[-1], ys[-1], label_text, color=col, fontweight=font_w, fontsize=9)
+        ax.scatter(xs[-1], ys[-1], s=120, color=c, edgecolors=ec, zorder=5)
+        ax.text(xs[-1], ys[-1], label, color=c, fontweight=fw, fontsize=9)
 
     # Ejes
-    if not all_x:
-        limit = 5
-    else:
-        limit = max(max(abs(x) for x in all_x), max(abs(y) for y in all_y)) * 1.15
-    if limit < 5: limit = 5
+    lim = 5
+    if all_x: lim = max(5, max(np.max(np.abs(all_x)), np.max(np.abs(all_y))) * 1.15)
 
-    ax.set_xlim(-limit, limit)
-    ax.set_ylim(-limit, limit)
-
-    # Fondo
-    ax.add_patch(Rectangle((0, 0), limit, limit, color='#e8f5e9', alpha=0.3))
-    ax.add_patch(Rectangle((0, -limit), limit, limit, color='#fffde7', alpha=0.3))
-    ax.add_patch(Rectangle((-limit, -limit), limit, limit, color='#ffebee', alpha=0.3))
-    ax.add_patch(Rectangle((-limit, 0), limit, limit, color='#e3f2fd', alpha=0.3))
-
-    ax.axhline(0, color='gray', lw=1)
-    ax.axvline(0, color='gray', lw=1)
-    ax.text(limit * 0.9, limit * 0.9, "LEADING", color='green', ha='right', fontweight='bold')
-    ax.text(limit * 0.9, -limit * 0.9, "WEAKENING", color='orange', ha='right', va='bottom', fontweight='bold')
-    ax.text(-limit * 0.9, -limit * 0.9, "LAGGING", color='red', ha='left', va='bottom', fontweight='bold')
-    ax.text(-limit * 0.9, limit * 0.9, "IMPROVING", color='blue', ha='left', fontweight='bold')
+    ax.set_xlim(-lim, lim);
+    ax.set_ylim(-lim, lim)
+    ax.add_patch(Rectangle((0, 0), lim, lim, color='#e8f5e9', alpha=0.3))
+    ax.add_patch(Rectangle((0, -lim), lim, lim, color='#fffde7', alpha=0.3))
+    ax.add_patch(Rectangle((-lim, -lim), lim, lim, color='#ffebee', alpha=0.3))
+    ax.add_patch(Rectangle((-lim, 0), lim, lim, color='#e3f2fd', alpha=0.3))
+    ax.axhline(0, c='gray');
+    ax.axvline(0, c='gray')
+    ax.text(lim * 0.9, lim * 0.9, "LEADING", color='green', ha='right', fontweight='bold')
+    ax.text(lim * 0.9, -lim * 0.9, "WEAKENING", color='orange', ha='right', va='bottom', fontweight='bold')
+    ax.text(-lim * 0.9, -lim * 0.9, "LAGGING", color='red', ha='left', va='bottom', fontweight='bold')
+    ax.text(-lim * 0.9, lim * 0.9, "IMPROVING", color='blue', ha='left', fontweight='bold')
 
     st.pyplot(fig)
+else:
+    st.info("Selecciona activos.")
