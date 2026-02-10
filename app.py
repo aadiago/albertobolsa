@@ -9,7 +9,7 @@ import base64
 import os
 
 # --- 1. CONFIGURACIÓN ---
-st.set_page_config(layout="wide", page_title="RRG Pro Mobile", page_icon="🐧")
+st.set_page_config(layout="wide", page_title="PENGUIN PORTFOLIO", page_icon="🐧")
 
 # CSS: Centrado agresivo y ajustes visuales
 st.markdown("""
@@ -94,7 +94,7 @@ ASSETS = [
 ]
 
 
-# --- 3. CÁLCULOS ---
+# --- 3. FUNCIONES ---
 
 def get_image_base64(path):
     if not os.path.exists(path): return None
@@ -140,7 +140,7 @@ def load_data_and_history():
     rows, history_dict = [], {}
     cached_imgs = {k: get_image_base64(v) for k, v in IMG_PATHS.items()}
 
-    bar = st.progress(0, text="Analizando...")
+    bar = st.progress(0, text="Analizando mercado...")
     total = len(ASSETS)
 
     for i, (sec, reg, tick) in enumerate(ASSETS):
@@ -158,31 +158,20 @@ def load_data_and_history():
             w_prev3m = float(w_series.iloc[-14]) if len(w_series) >= 14 else w_curr
             m3_pct = ((w_curr / w_prev3m) - 1) * 100
 
-            # RRG Data: [Hoy, 1W, 2W, 3W, 4W]
+            # RRG Data
             rrg_data = [calculate_rrg_zscore(w_series, bench, o) for o in
                         [0, OFFSET_1W, OFFSET_2W, OFFSET_3W, OFFSET_4W]]
             history_dict[tick] = rrg_data
 
-            # --- CORRECCIÓN MATEMÁTICA DE LA NOTA ---
-            # 1. Obtenemos nota pura de cada semana
+            # Score (Corregido peso temporal)
             raw_scores = [5.0 + (d[1] * 0.12 + d[2] * 0.04) if d[0] != "Error" else 0.0 for d in rrg_data]
+            ordered_scores = raw_scores[::-1]  # [4W ... Hoy]
+            final_sc = np.average(ordered_scores, weights=[0.05, 0.1, 0.15, 0.25, 0.45])
 
-            # 2. Invertimos para que coincida con los pesos (Viejo -> Nuevo)
-            # raw_scores original: [Hoy, 1W, 2W, 3W, 4W]
-            # ordered_scores:      [4W, 3W, 2W, 1W, Hoy]
-            ordered_scores = raw_scores[::-1]
-
-            # 3. Media Ponderada (0.05 para 4W ... 0.45 para Hoy)
-            weights = [0.05, 0.10, 0.15, 0.25, 0.45]
-            final_sc = np.average(ordered_scores, weights=weights)
-
-            # 4. Bonus Consistencia (Si mejora respecto a la semana anterior)
             bonus = 0.0
             for k in range(1, 5):
                 if ordered_scores[k] > ordered_scores[k - 1]: bonus += 0.2
-
-            final_sc = max(0.0, min(10.0, final_sc + bonus))
-            # ---------------------------------------------
+            final_sc = max(0, min(10, final_sc + bonus))
 
             # Iconos
             is_sec = cached_imgs.get(SECTOR_IMG_MAP.get(sec, "")) or ""
@@ -193,24 +182,29 @@ def load_data_and_history():
             elif "INDICE" in sec or "WORLD" in sec:
                 is_pro = cached_imgs.get("PIRANHA") or ""
 
-            # Emojis Color POS
+            # Formatos Visuales
+            # 1. POS con Bloques
             pos_label = rrg_data[0][0]
             pos_display = pos_label
             if "Leading" in pos_label:
-                pos_display = "🟢 Lead"
+                pos_display = "🟩 Leading"
             elif "Weakening" in pos_label:
-                pos_display = "🟡 Weak"
+                pos_display = "🟨 Weak"
             elif "Lagging" in pos_label:
-                pos_display = "🔴 Lagg"
+                pos_display = "🟥 Lagging"
             elif "Improving" in pos_label:
-                pos_display = "🔵 Impr"
+                pos_display = "🟦 Impr"
+
+            # 2. Porcentajes con Semáforo
+            str_hoy = f"🟢 {day_pct:+.2f}%" if day_pct >= 0 else f"🔴 {day_pct:+.2f}%"
+            str_3m = f"🟢 {m3_pct:+.2f}%" if m3_pct >= 0 else f"🔴 {m3_pct:+.2f}%"
 
             rows.append({
                 "Ver": (tick in MY_PORTFOLIO),
                 "Img_S": is_sec, "Img_R": is_reg, "Img_P": is_pro,
                 "Ticker": tick, "Sector": sec, "Region": reg,
                 "Score": final_sc,
-                "% Hoy": day_pct, "% 3M": m3_pct,
+                "% Hoy": str_hoy, "% 3M": str_3m,
                 "POS": pos_display,
                 "STR": rrg_data[0][1], "MOM": rrg_data[0][2]
             })
@@ -226,14 +220,14 @@ def load_data_and_history():
 
 
 # --- 4. INTERFAZ ---
-st.header("📊 RRG Pro Mobile")
+st.header("🐧 PENGUIN PORTFOLIO")
 df, rrg_hist = load_data_and_history()
 
 if df.empty:
     st.error("Error de datos.")
     st.stop()
 
-st.caption("Marca 'Ver' para añadir/quitar del gráfico. Tu cartera está marcada por defecto.")
+st.caption("Sofía & Alberto 2026")
 
 # Configuración Columnas
 col_conf = {
@@ -243,8 +237,8 @@ col_conf = {
     "Img_R": st.column_config.ImageColumn("Reg", width="small"),
     "Img_P": st.column_config.ImageColumn("👤", width="small"),
     "Score": st.column_config.NumberColumn("Nota", format="%.1f"),
-    "% Hoy": st.column_config.NumberColumn("% Hoy", format="%.2f%%"),
-    "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%"),
+    "% Hoy": st.column_config.TextColumn("% Hoy", width="medium"),
+    "% 3M": st.column_config.TextColumn("% 3M", width="medium"),
     "STR": st.column_config.NumberColumn(format="%.2f"),
     "MOM": st.column_config.NumberColumn(format="%.2f"),
 }
@@ -281,15 +275,13 @@ if plot_tickers:
         pts = [(r[1], r[2]) for r in raw if r[0] != "Error"]
         if len(pts) < 2: continue
 
-        # Ordenar cronológico para pintar traza: 4W -> Hoy
         pts_chron = list(reversed(pts))
         xs = np.array([p[0] for p in pts_chron])
         ys = np.array([p[1] for p in pts_chron])
 
-        all_x.extend(xs)
+        all_x.extend(xs);
         all_y.extend(ys)
 
-        # Spline
         px, py = xs, ys
         if len(xs) >= 3:
             try:
@@ -304,7 +296,7 @@ if plot_tickers:
         ax.plot(px, py, color=c, lw=2, alpha=0.8)
         ax.scatter(xs[:-1], ys[:-1], s=20, color=c, alpha=0.6)
 
-        # Cabeza
+        # Etiqueta
         row_info = edited_df[edited_df['Ticker'] == t].iloc[0]
         label = f" {row_info['Sector']} {row_info['Region']}"
         fw, ec = 'normal', c
@@ -315,7 +307,6 @@ if plot_tickers:
         ax.scatter(xs[-1], ys[-1], s=120, color=c, edgecolors=ec, zorder=5)
         ax.text(xs[-1], ys[-1], label, color=c, fontweight=fw, fontsize=9)
 
-    # Ejes
     lim = 5
     if all_x: lim = max(5, max(np.max(np.abs(all_x)), np.max(np.abs(all_y))) * 1.15)
 
