@@ -43,16 +43,20 @@ MY_PORTFOLIO = [
     "SPYU.DE", "XDWM.DE", "CEMS.DE"
 ]
 
+# AÑADIDO: "PHY": "phy.png"
 IMG_PATHS = {
     "PENGUIN": "penguin.png", "PIRANHA": "PIRANHA.png",
     "USA": "usa.png", "EUR": "eur.png", "WRL": "wrl.png", "EME": "eme.png",
+    "JPN": "japan.png", "CHN": "china.png", "PHY": "phy.png",
     "SEC_TECH": "TECHNOLOGY.png", "SEC_SIZE": "SIZE.png", "SEC_MOM": "MOMENTUM.png",
     "SEC_VAL": "VALUE.png", "SEC_REIT": "REIT.png", "SEC_YIELD": "HIGH YIELD.png",
     "SEC_VOL": "VOLATILITY.png", "SEC_IND": "INDUSTRIALS.png", "SEC_QUAL": "QUALITY.png",
     "SEC_DISC": "DISCRETIONARY.png", "SEC_STAPLES": "STAPLES.png", "SEC_ENERGY": "ENERGY.png",
     "SEC_MAT": "MATERIALS.png", "SEC_COMM": "COMMUNICATIONS.png", "SEC_UTIL": "UTILITIES.png",
     "SEC_FIN": "FINANCIALS.png", "SEC_HC": "HEALTH CARE.png", "SEC_CASH": "CASH.png",
-    "SEC_IDX": "INDICES.png"
+    "SEC_IDX": "INDICES.png",
+    "SEC_CRYPTO": "crypto.png",
+    "SEC_GOLD": "gold.png"
 }
 
 SECTOR_IMG_MAP = {
@@ -62,9 +66,12 @@ SECTOR_IMG_MAP = {
     "DISCRETIONARY": "SEC_DISC", "STAPLES": "SEC_STAPLES", "ENERGY": "SEC_ENERGY",
     "MATERIALS": "SEC_MAT", "COMMUNICATIONS": "SEC_COMM", "UTILITIES": "SEC_UTIL",
     "FINANCIALS": "SEC_FIN", "HEALTH CARE": "SEC_HC", "CASH": "SEC_CASH",
-    "INDICE": "SEC_IDX", "MSCI WORLD EW": "SEC_IDX"
+    "INDICE": "SEC_IDX", "MSCI WORLD EW": "SEC_IDX",
+    "CRYPTO": "SEC_CRYPTO",
+    "GOLD": "SEC_GOLD"
 }
 
+# CAMBIOS: PHY para IB1T.DE y 8PSG.DE
 ASSETS = [
     ("CASH", "EUR", "YCSH.DE"),
     ("MSCI WORLD EW", "WRL", "MWEQ.DE"),
@@ -90,7 +97,12 @@ ASSETS = [
     ("FINANCIALS", "WRL", "XDWF.DE"), ("INDICE", "USA", "SXR8.DE"), ("COMMUNICATIONS", "USA", "IU5C.DE"),
     ("COMMUNICATIONS", "WRL", "XWTS.DE"), ("MOMENTUM", "USA", "QDVA.DE"), ("FINANCIALS", "USA", "QDVH.DE"),
     ("TECHNOLOGY", "WRL", "XDWT.DE"), ("TECHNOLOGY", "USA", "QDVE.DE"), ("DISCRETIONARY", "USA", "QDVK.DE"),
-    ("DISCRETIONARY", "WRL", "XDWC.DE"), ("TECHNOLOGY", "EME", "EMQQ.DE"), ("DISCRETIONARY", "EUR", "SPYR.DE")
+    ("DISCRETIONARY", "WRL", "XDWC.DE"), ("TECHNOLOGY", "EME", "EMQQ.DE"), ("DISCRETIONARY", "EUR", "SPYR.DE"),
+    ("INDICE", "JPN", "LCUJ.DE"),
+    ("INDICE", "CHN", "ICGA.DE"),
+    ("TECHNOLOGY", "CHN", "CBUK.DE"),
+    ("CRYPTO", "PHY", "IB1T.DE"),
+    ("GOLD", "PHY", "8PSG.DE")
 ]
 
 
@@ -163,9 +175,9 @@ def load_data_and_history():
                         [0, OFFSET_1W, OFFSET_2W, OFFSET_3W, OFFSET_4W]]
             history_dict[tick] = rrg_data
 
-            # Score (Corregido peso temporal)
+            # Score
             raw_scores = [5.0 + (d[1] * 0.12 + d[2] * 0.04) if d[0] != "Error" else 0.0 for d in rrg_data]
-            ordered_scores = raw_scores[::-1]  # [4W ... Hoy]
+            ordered_scores = raw_scores[::-1]
             final_sc = np.average(ordered_scores, weights=[0.05, 0.1, 0.15, 0.25, 0.45])
 
             bonus = 0.0
@@ -182,8 +194,7 @@ def load_data_and_history():
             elif "INDICE" in sec or "WORLD" in sec:
                 is_pro = cached_imgs.get("PIRANHA") or ""
 
-            # Formatos Visuales
-            # 1. POS con Bloques
+            # Posición
             pos_label = rrg_data[0][0]
             pos_display = pos_label
             if "Leading" in pos_label:
@@ -195,18 +206,16 @@ def load_data_and_history():
             elif "Improving" in pos_label:
                 pos_display = "🟦 Impr"
 
-            # 2. Porcentajes con Semáforo
-            str_hoy = f"🟢 {day_pct:+.2f}%" if day_pct >= 0 else f"🔴 {day_pct:+.2f}%"
-            str_3m = f"🟢 {m3_pct:+.2f}%" if m3_pct >= 0 else f"🔴 {m3_pct:+.2f}%"
-
             rows.append({
                 "Ver": (tick in MY_PORTFOLIO),
                 "Img_S": is_sec, "Img_R": is_reg, "Img_P": is_pro,
                 "Ticker": tick, "Sector": sec, "Region": reg,
-                "Score": final_sc,
-                "% Hoy": str_hoy, "% 3M": str_3m,
+                "Score": float(final_sc),
+                "% Hoy": float(day_pct),
+                "% 3M": float(m3_pct),
                 "POS": pos_display,
-                "STR": rrg_data[0][1], "MOM": rrg_data[0][2]
+                "STR": float(rrg_data[0][1]),
+                "MOM": float(rrg_data[0][2])
             })
         except:
             continue
@@ -214,6 +223,10 @@ def load_data_and_history():
     bar.empty()
     df = pd.DataFrame(rows)
     if not df.empty:
+        cols_num = ["Score", "% Hoy", "% 3M", "STR", "MOM"]
+        for c in cols_num:
+            df[c] = pd.to_numeric(df[c])
+
         df = df.sort_values(by="Score", ascending=False).reset_index(drop=True)
         df.insert(1, "#", range(1, len(df) + 1))
     return df, history_dict
@@ -237,10 +250,10 @@ col_conf = {
     "Img_R": st.column_config.ImageColumn("Reg", width="small"),
     "Img_P": st.column_config.ImageColumn("👤", width="small"),
     "Score": st.column_config.NumberColumn("Nota", format="%.1f"),
-    "% Hoy": st.column_config.TextColumn("% Hoy", width="medium"),
-    "% 3M": st.column_config.TextColumn("% 3M", width="medium"),
-    "STR": st.column_config.NumberColumn(format="%.2f"),
-    "MOM": st.column_config.NumberColumn(format="%.2f"),
+    "% Hoy": st.column_config.NumberColumn("% Hoy", format="%.2f%%", width="medium"),
+    "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%", width="medium"),
+    "STR": st.column_config.NumberColumn("STR", format="%.2f"),
+    "MOM": st.column_config.NumberColumn("MOM", format="%.2f"),
 }
 
 visible_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "Ticker", "Score", "% Hoy", "% 3M", "POS", "STR", "MOM"]
@@ -263,7 +276,7 @@ st.divider()
 st.subheader(f"📈 Gráfico RRG ({len(plot_tickers)} activos)")
 
 if plot_tickers:
-    fig, ax = plt.subplots(figsize=(10, 10))
+    fig, ax = plt.subplots(figsize=(10, 8))
     colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22',
               '#17becf']
     all_x, all_y = [], []
@@ -279,7 +292,7 @@ if plot_tickers:
         xs = np.array([p[0] for p in pts_chron])
         ys = np.array([p[1] for p in pts_chron])
 
-        all_x.extend(xs);
+        all_x.extend(xs)
         all_y.extend(ys)
 
         px, py = xs, ys
@@ -307,21 +320,45 @@ if plot_tickers:
         ax.scatter(xs[-1], ys[-1], s=120, color=c, edgecolors=ec, zorder=5)
         ax.text(xs[-1], ys[-1], label, color=c, fontweight=fw, fontsize=9)
 
-    lim = 5
-    if all_x: lim = max(5, max(np.max(np.abs(all_x)), np.max(np.abs(all_y))) * 1.15)
+    # Lógica de Ejes Dinámicos
+    if all_x and all_y:
+        margin = 0.1
 
-    ax.set_xlim(-lim, lim);
-    ax.set_ylim(-lim, lim)
-    ax.add_patch(Rectangle((0, 0), lim, lim, color='#e8f5e9', alpha=0.3))
-    ax.add_patch(Rectangle((0, -lim), lim, lim, color='#fffde7', alpha=0.3))
-    ax.add_patch(Rectangle((-lim, -lim), lim, lim, color='#ffebee', alpha=0.3))
-    ax.add_patch(Rectangle((-lim, 0), lim, lim, color='#e3f2fd', alpha=0.3))
-    ax.axhline(0, c='gray');
-    ax.axvline(0, c='gray')
-    ax.text(lim * 0.9, lim * 0.9, "LEADING", color='green', ha='right', fontweight='bold')
-    ax.text(lim * 0.9, -lim * 0.9, "WEAKENING", color='orange', ha='right', va='bottom', fontweight='bold')
-    ax.text(-lim * 0.9, -lim * 0.9, "LAGGING", color='red', ha='left', va='bottom', fontweight='bold')
-    ax.text(-lim * 0.9, lim * 0.9, "IMPROVING", color='blue', ha='left', fontweight='bold')
+        x_min_dat, x_max_dat = min(all_x), max(all_x)
+        x_rng = x_max_dat - x_min_dat if x_max_dat != x_min_dat else 1.0
+        x_lim_min = x_min_dat - (x_rng * margin)
+        x_lim_max = x_max_dat + (x_rng * margin)
+        if x_lim_min > -0.5 and x_lim_min < 0: x_lim_min = -0.5
+        if x_lim_max < 0.5 and x_lim_max > 0: x_lim_max = 0.5
+
+        y_min_dat, y_max_dat = min(all_y), max(all_y)
+        y_rng = y_max_dat - y_min_dat if y_max_dat != y_min_dat else 1.0
+        y_lim_min = y_min_dat - (y_rng * margin)
+        y_lim_max = y_max_dat + (y_rng * margin)
+
+        ax.set_xlim(x_lim_min, x_lim_max)
+        ax.set_ylim(y_lim_min, y_lim_max)
+
+        w_right = max(0, x_lim_max)
+        h_top = max(0, y_lim_max)
+        ax.add_patch(Rectangle((0, 0), w_right, h_top, color='#e8f5e9', alpha=0.3, zorder=0))
+
+        h_bot = min(0, y_lim_min)
+        ax.add_patch(Rectangle((0, 0), w_right, h_bot, color='#fffde7', alpha=0.3, zorder=0))
+
+        w_left = min(0, x_lim_min)
+        ax.add_patch(Rectangle((0, 0), w_left, h_bot, color='#ffebee', alpha=0.3, zorder=0))
+
+        ax.add_patch(Rectangle((0, 0), w_left, h_top, color='#e3f2fd', alpha=0.3, zorder=0))
+
+        ax.axhline(0, c='gray', lw=1, zorder=1)
+        ax.axvline(0, c='gray', lw=1, zorder=1)
+
+        ax.text(x_lim_max * 0.95, y_lim_max * 0.95, "LEADING", color='green', ha='right', va='top', fontweight='bold')
+        ax.text(x_lim_max * 0.95, y_lim_min * 0.95, "WEAKENING", color='orange', ha='right', va='bottom',
+                fontweight='bold')
+        ax.text(x_lim_min * 0.95, y_lim_min * 0.95, "LAGGING", color='red', ha='left', va='bottom', fontweight='bold')
+        ax.text(x_lim_min * 0.95, y_lim_max * 0.95, "IMPROVING", color='blue', ha='left', va='top', fontweight='bold')
 
     st.pyplot(fig)
 else:
