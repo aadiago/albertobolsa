@@ -13,14 +13,17 @@ import io
 # --- 1. CONFIGURACIÓN ---
 st.set_page_config(layout="wide", page_title="PENGUIN PORTFOLIO", page_icon="🐧")
 
-# CSS: Ajustes para dispositivos táctiles
+# CSS: Centrado ajustado
 st.markdown("""
     <style>
     div[data-testid="stDataFrame"] div[role="columnheader"] {
         justify-content: center !important; text-align: center !important;
     }
     div[data-testid="stDataFrame"] div[role="gridcell"] {
-        justify-content: center !important; text-align: center !important;
+        justify-content: center !important; text-align: center !important; display: flex !important;
+    }
+    div[data-testid="stDataFrame"] div[role="gridcell"] > div {
+        justify-content: center !important; text-align: center !important; margin: auto !important;
     }
     div[data-testid="stDataFrame"] td img {
         display: block; margin-left: auto; margin-right: auto;
@@ -43,7 +46,6 @@ MY_PORTFOLIO = [
     "SPYH.DE", "XDWM.DE", "XDW0.DE"
 ]
 
-# ETFs PARA LA PIRAÑA
 PIRANHA_ETFS = ["SXR8.DE", "XDEW.DE", "XDEE.DE", "IBCF.DE"]
 
 # FORMATO: ("Nombre del Activo", "Región", "Ticker", "Img_Sector", "Img_Región")
@@ -229,52 +231,48 @@ ASSETS = [
 ]
 
 
-# --- 3. FUNCIONES DE IMAGEN EXTREMA ---
-def get_image_base64(path, is_profile=False):
+# --- 3. LECTURA DE IMÁGENES A PRUEBA DE FALLOS ---
+def get_image_base64(path, scale=1.0):
     if not os.path.exists(path): return ""
     try:
-        # A los Pingüinos/Pirañas/Bench los tratamos con cariño (son pocos)
-        if is_profile:
-            with open(path, "rb") as f: data = f.read()
-            return "data:image/png;base64," + base64.b64encode(data).decode()
-
-        # A los 356 Sectores y Regiones los ponemos a dieta extrema para los móviles
+        # Abrimos la imagen (convertimos a RGBA de forma segura por si no tiene transparencia)
         img = Image.open(path).convert("RGBA")
 
-        # 1. Le quitamos el canal Alpha (transparencia) que ahoga la memoria gráfica
-        bg = Image.new("RGB", img.size, (255, 255, 255))
-        bg.paste(img, (0, 0), img)  # Usa la propia imagen como máscara de recorte
+        # Forzamos tamaño miniatura para que no colapse la memoria del móvil
+        max_size = int(45 * scale)
+        img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
 
-        # 2. La encogemos brutalmente (28x28)
-        bg.thumbnail((28, 28), Image.Resampling.LANCZOS)
-
-        # 3. La guardamos como JPEG en calidad 50%
         buffered = io.BytesIO()
-        bg.save(buffered, format="JPEG", quality=50)
-        data = buffered.getvalue()
-
-        return "data:image/jpeg;base64," + base64.b64encode(data).decode()
-
+        img.save(buffered, format="PNG")
+        return "data:image/png;base64," + base64.b64encode(buffered.getvalue()).decode()
     except Exception:
-        return ""
+        # Si algo falla al comprimir, en vez de dejar la celda en blanco,
+        # pasamos el archivo original directamente
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+            return "data:image/png;base64," + base64.b64encode(data).decode()
+        except:
+            return ""
 
 
-IMG_PATHS_SEC_REG = {}
+IMG_PATHS = {"PENGUIN": "penguin.png", "PIRANHA": "PIRANHA.png", "BENCH": "BENCH.PNG"}
 for item in ASSETS:
-    IMG_PATHS_SEC_REG[item[3]] = item[3]
-    IMG_PATHS_SEC_REG[item[4]] = item[4]
+    IMG_PATHS[item[3]] = item[3]
+    IMG_PATHS[item[4]] = item[4]
 
-IMG_PATHS_PROFILE = {"PENGUIN": "penguin.png", "PIRANHA": "PIRANHA.png", "BENCH": "BENCH.PNG"}
-
+# Escalas ajustadas
 cached_imgs = {}
+for img_name in IMG_PATHS.values():
+    scale = 1.0
+    if img_name in ["EME.PNG", "INDIA.PNG"]:
+        scale = 0.85
+    elif img_name == "ALL.PNG":
+        scale = 1.25
+    elif img_name == "HIGH YIELD.PNG":
+        scale = 0.80
 
-# Procesar los Pingüinos como PNG
-for k, v in IMG_PATHS_PROFILE.items():
-    cached_imgs[v] = get_image_base64(v, is_profile=True)
-
-# Procesar Sectores y Regiones como JPEG
-for v in IMG_PATHS_SEC_REG.values():
-    cached_imgs[v] = get_image_base64(v, is_profile=False)
+    cached_imgs[img_name] = get_image_base64(img_name, scale)
 
 
 # --- 4. FUNCIONES PRINCIPALES ---
@@ -387,6 +385,7 @@ def calculate_rrg_zscore(p_ticker, p_bench, offset):
 # --- 5. INTERFAZ ---
 col_logo, col_title = st.columns([1, 15])
 with col_logo:
+    # Busca el pingüino directamente en tu carpeta
     if os.path.exists("PINGUINO.PNG"):
         st.image("PINGUINO.PNG", width=60)
     else:
