@@ -233,13 +233,13 @@ ASSETS = [
 
 
 # --- 3. FUNCIONES DE IMAGEN ---
-def get_image_base64(path, scale=1.0, max_size=45):
+def get_image_base64(path, scale=1.0, max_size=32):
     if not os.path.exists(path): return None
     try:
         # Abrimos la imagen
         img = Image.open(path).convert("RGBA")
 
-        # 1. FORZAR TAMAÑO MINIATURA (Evita que los móviles colapsen por falta de RAM)
+        # 1. FORZAR TAMAÑO MINIATURA (Clave para que no colapse la memoria del móvil)
         img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
 
         # 2. APLICAR TU ESCALA PERSONALIZADA
@@ -248,7 +248,7 @@ def get_image_base64(path, scale=1.0, max_size=45):
         new_h = max(1, int(orig_h * scale))
         img_resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
-        # Si la hacemos más pequeña, le ponemos un fondo transparente para que no pierda el centrado
+        # Si la hacemos más pequeña, le ponemos un fondo transparente para centrarla
         if scale < 1.0:
             new_img = Image.new("RGBA", (orig_w, orig_h), (255, 255, 255, 0))
             offset_x = (orig_w - new_w) // 2
@@ -257,15 +257,16 @@ def get_image_base64(path, scale=1.0, max_size=45):
         else:
             new_img = img_resized
 
-        # Guardar en memoria optimizada
+        # 3. COMPRESIÓN EXTREMA: reducimos colores para que pese un 80% menos
+        new_img = new_img.convert("P", palette=Image.ADAPTIVE, colors=64).convert("RGBA")
+
         buffered = io.BytesIO()
         new_img.save(buffered, format="PNG", optimize=True)
         data = buffered.getvalue()
 
     except Exception:
-        # Si falla el procesado, la mandamos tal cual
-        with open(path, "rb") as f:
-            data = f.read()
+        # Si ocurre un error leyendo la imagen, devolvemos None para no saturar con errores
+        return None
 
     return "data:image/png;base64," + base64.b64encode(data).decode()
 
