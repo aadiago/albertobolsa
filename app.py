@@ -7,6 +7,8 @@ from matplotlib.patches import Rectangle
 from scipy.interpolate import make_interp_spline
 import base64
 import os
+from PIL import Image
+import io
 
 # --- 1. CONFIGURACIÓN ---
 st.set_page_config(layout="wide", page_title="PENGUIN PORTFOLIO", page_icon="🐧")
@@ -38,80 +40,326 @@ OFFSET_2W = -2
 OFFSET_3W = -3
 OFFSET_4W = -4
 
+# TU CARTERA ORIGINAL
 MY_PORTFOLIO = [
     "QDVF.DE", "JREM.DE", "XDWI.DE",
     "SPYH.DE", "XDWM.DE", "XDW0.DE"
 ]
 
-# AÑADIDO: "PHY": "phy.png"
-IMG_PATHS = {
-    "PENGUIN": "penguin.png", "PIRANHA": "PIRANHA.png",
-    "USA": "usa.png", "EUR": "eur.png", "WRL": "wrl.png", "EME": "eme.png",
-    "JPN": "japan.png", "CHN": "china.png", "PHY": "phy.png",
-    "SEC_TECH": "TECHNOLOGY.png", "SEC_SIZE": "SIZE.png", "SEC_MOM": "MOMENTUM.png",
-    "SEC_VAL": "VALUE.png", "SEC_REIT": "REIT.png", "SEC_YIELD": "HIGH YIELD.png",
-    "SEC_VOL": "VOLATILITY.png", "SEC_IND": "INDUSTRIALS.png", "SEC_QUAL": "QUALITY.png",
-    "SEC_DISC": "DISCRETIONARY.png", "SEC_STAPLES": "STAPLES.png", "SEC_ENERGY": "ENERGY.png",
-    "SEC_MAT": "MATERIALS.png", "SEC_COMM": "COMMUNICATIONS.png", "SEC_UTIL": "UTILITIES.png",
-    "SEC_FIN": "FINANCIALS.png", "SEC_HC": "HEALTH CARE.png", "SEC_CASH": "CASH.png",
-    "SEC_IDX": "INDICES.png",
-    "SEC_CRYPTO": "crypto.png",
-    "SEC_GOLD": "gold.png"
-}
+# ETFs PARA LA PIRAÑA
+PIRANHA_ETFS = ["SXR8.DE", "XDEW.DE", "XDEE.DE", "IBCF.DE"]
 
-SECTOR_IMG_MAP = {
-    "TECHNOLOGY": "SEC_TECH", "SIZE": "SEC_SIZE", "MOMENTUM": "SEC_MOM",
-    "VALUE": "SEC_VAL", "REIT": "SEC_REIT", "HIGH YIELD": "SEC_YIELD",
-    "LOW VOL": "SEC_VOL", "INDUSTRIALS": "SEC_IND", "QUALITY": "SEC_QUAL",
-    "DISCRETIONARY": "SEC_DISC", "STAPLES": "SEC_STAPLES", "ENERGY": "SEC_ENERGY",
-    "MATERIALS": "SEC_MAT", "COMMUNICATIONS": "SEC_COMM", "UTILITIES": "SEC_UTIL",
-    "FINANCIALS": "SEC_FIN", "HEALTH CARE": "SEC_HC", "CASH": "SEC_CASH",
-    "INDICE": "SEC_IDX", "MSCI WORLD EW": "SEC_IDX",
-    "CRYPTO": "SEC_CRYPTO",
-    "GOLD": "SEC_GOLD"
-}
-
-# CAMBIOS: PHY para IB1T.DE y 8PSG.DE
+# FORMATO: ("Nombre del Activo", "Región", "Ticker", "Img_Sector", "Img_Región")
 ASSETS = [
-    ("CASH", "EUR", "YCSH.DE"),
-    ("MSCI WORLD EW", "WRL", "MWEQ.DE"),
-    ("ENERGY", "USA", "QDVF.DE"), ("ENERGY", "WRL", "XDW0.DE"), ("STAPLES", "USA", "2B7D.DE"),
-    ("ENERGY", "EUR", "SPYN.DE"), ("STAPLES", "WRL", "XDWS.DE"), ("STAPLES", "EUR", "SPYC.DE"),
-    ("VALUE", "EME", "5MVL.DE"), ("HIGH YIELD", "EME", "EUNY.DE"), ("UTILITIES", "EUR", "SPYU.DE"),
-    ("HIGH YIELD", "USA", "XDND.DE"), ("INDUSTRIALS", "USA", "2B7C.DE"), ("VALUE", "WRL", "IS3S.DE"),
-    ("MATERIALS", "EUR", "SPYP.DE"), ("MATERIALS", "WRL", "XDWM.DE"), ("MATERIALS", "USA", "2B7B.DE"),
-    ("VALUE", "EUR", "CEMS.DE"),
-    ("QUALITY", "EME", "JREM.DE"), ("VALUE", "USA", "QDVI.DE"),
-    ("INDUSTRIALS", "WRL", "XDWI.DE"), ("SIZE", "USA", "ZPRV.DE"), ("SIZE", "EME", "SPYX.DE"),
-    ("INDICE", "EME", "IS3N.DE"), ("MOMENTUM", "EME", "EGEE.DE"), ("LOW VOL", "EUR", "ZPRL.DE"),
-    ("LOW VOL", "EME", "EUNZ.DE"), ("LOW VOL", "USA", "SPY1.DE"), ("SIZE", "EUR", "ZPRX.DE"),
-    ("REIT", "USA", "IQQ7.DE"), ("REIT", "WRL", "SPY2.DE"), ("HIGH YIELD", "WRL", "XZDW.DE"),
-    ("REIT", "EUR", "IPRE.DE"), ("UTILITIES", "WRL", "XDWU.DE"), ("SIZE", "WRL", "IUSN.DE"),
-    ("INDICE", "EUR", "LYP6.DE"), ("MOMENTUM", "EUR", "CEMR.DE"), ("FINANCIALS", "EUR", "SPYZ.DE"),
-    ("INDUSTRIALS", "EUR", "SPYQ.DE"),
-    ("COMMUNICATIONS", "EUR", "SPYT.DE"),
-    ("HIGH YIELD", "EUR", "XZDZ.DE"), ("HEALTH CARE", "EUR", "SPYH.DE"), ("QUALITY", "EUR", "CEMQ.DE"),
-    ("UTILITIES", "USA", "2B7A.DE"), ("QUALITY", "WRL", "IS3Q.DE"), ("LOW VOL", "WRL", "CSY9.DE"),
-    ("INDICE", "WRL", "EUNL.DE"), ("HEALTH CARE", "WRL", "XDWH.DE"), ("HEALTH CARE", "USA", "QDVG.DE"),
-    ("TECHNOLOGY", "EUR", "SPYK.DE"), ("MOMENTUM", "WRL", "IS3R.DE"), ("QUALITY", "USA", "QDVB.DE"),
-    ("FINANCIALS", "WRL", "XDWF.DE"), ("INDICE", "USA", "SXR8.DE"), ("COMMUNICATIONS", "USA", "IU5C.DE"),
-    ("COMMUNICATIONS", "WRL", "XWTS.DE"), ("MOMENTUM", "USA", "QDVA.DE"), ("FINANCIALS", "USA", "QDVH.DE"),
-    ("TECHNOLOGY", "WRL", "XDWT.DE"), ("TECHNOLOGY", "USA", "QDVE.DE"), ("DISCRETIONARY", "USA", "QDVK.DE"),
-    ("DISCRETIONARY", "WRL", "XDWC.DE"), ("TECHNOLOGY", "EME", "EMQQ.DE"), ("DISCRETIONARY", "EUR", "SPYR.DE"),
-    ("INDICE", "JPN", "LCUJ.DE"),
-    ("INDICE", "CHN", "ICGA.DE"),
-    ("TECHNOLOGY", "CHN", "CBUK.DE"),
-    ("CRYPTO", "PHY", "IB1T.DE"),
-    ("GOLD", "PHY", "8PSG.DE")
+    ("AGGREGATE HDG", "EME", "XEMB.DE", "BONDS.PNG", "EME.PNG"),
+    ("AGGREGATE HDG", "WRL", "DBZB.DE", "BONDS.PNG", "WRL.PNG"),
+    ("CASH", "EUR", "YCSH.DE", "CASH.PNG", "EUR.PNG"),
+    ("CORPORATE BONDS", "WRL", "D5BG.DE", "BONDS.PNG", "WRL.PNG"),
+    ("CORPORATE HIGH YIELD BONDS", "WRL", "XHYA.DE", "BONDS.PNG", "WRL.PNG"),
+    ("EUROZONE GOVERNMENT BOND 1-3", "EUR", "DBXP.DE", "BONDS.PNG", "EUR.PNG"),
+    ("EUROZONE GOVERNMENT BOND 10-15", "EUR", "LYQ6.DE", "BONDS.PNG", "EUR.PNG"),
+    ("EUROZONE GOVERNMENT BOND 15+", "EUR", "LYXF.DE", "BONDS.PNG", "EUR.PNG"),
+    ("EUROZONE GOVERNMENT BOND 3-5", "EUR", "LYQ3.DE", "BONDS.PNG", "EUR.PNG"),
+    ("EUROZONE GOVERNMENT BOND 7-10", "EUR", "LYXD.DE", "BONDS.PNG", "EUR.PNG"),
+    ("JAPAN AGGREGATE HDG", "JPN", "CEB2.DE", "BONDS.PNG", "JAPAN.PNG"),
+    ("TIPS", "EUR", "XEIN.DE", "BONDS.PNG", "EUR.PNG"),
+    ("TIPS HDG", "USA", "IBC5.DE", "BONDS.PNG", "USA.PNG"),
+    ("TREASURY AGGREGATE", "USA", "VAGT.DE", "BONDS.PNG", "USA.PNG"),
+    ("AGRICULTURE", "COM", "AIGA.MI", "FARM.PNG", "COM.PNG"),
+    ("BITCOIN", "COM", "IB1T.DE", "CRYPTO.PNG", "COM.PNG"),
+    ("BLOOMBERG COMMODITY", "COM", "CMOE.MI", "COM.PNG", "COM.PNG"),
+    ("GOLD", "COM", "8PSG.DE", "GOLD.PNG", "COM.PNG"),
+    ("GOLD HDG", "COM", "XGDE.DE", "GOLD.PNG", "COM.PNG"),
+    ("STRATEGIC METALS", "COM", "WENH.DE", "METALS.PNG", "COM.PNG"),
+    ("HIGH YIELD", "EME", "EUNY.DE", "HIGH YIELD.PNG", "EME.PNG"),
+    ("HIGH YIELD", "EUR", "XZDZ.DE", "HIGH YIELD.PNG", "EUR.PNG"),
+    ("HIGH YIELD", "USA", "XDND.DE", "HIGH YIELD.PNG", "USA.PNG"),
+    ("HIGH YIELD", "WRL", "XZDW.DE", "HIGH YIELD.PNG", "WRL.PNG"),
+    ("LOW VOLATILITY", "EME", "EUNZ.DE", "VOLATILITY.PNG", "EME.PNG"),
+    ("LOW VOLATILITY", "EUR", "ZPRL.DE", "VOLATILITY.PNG", "EUR.PNG"),
+    ("LOW VOLATILITY", "USA", "SPY1.DE", "VOLATILITY.PNG", "USA.PNG"),
+    ("LOW VOLATILITY", "WRL", "CSY9.DE", "VOLATILITY.PNG", "WRL.PNG"),
+    ("MOMENTUM", "EME", "EGEE.DE", "MOMENTUM.PNG", "EME.PNG"),
+    ("MOMENTUM", "EUR", "CEMR.DE", "MOMENTUM.PNG", "EUR.PNG"),
+    ("MOMENTUM", "USA", "QDVA.DE", "MOMENTUM.PNG", "USA.PNG"),
+    ("MOMENTUM", "WRL", "IS3R.DE", "MOMENTUM.PNG", "WRL.PNG"),
+    ("QUALITY", "EME", "JREM.DE", "QUALITY.PNG", "EME.PNG"),
+    ("QUALITY", "EUR", "CEMQ.DE", "QUALITY.PNG", "EUR.PNG"),
+    ("QUALITY", "USA", "QDVB.DE", "QUALITY.PNG", "USA.PNG"),
+    ("QUALITY", "WRL", "IS3Q.DE", "QUALITY.PNG", "WRL.PNG"),
+    ("SIZE", "EME", "SPYX.DE", "SIZE.PNG", "EME.PNG"),
+    ("SIZE", "EUR", "ZPRX.DE", "SIZE.PNG", "EUR.PNG"),
+    ("SIZE", "USA", "ZPRV.DE", "SIZE.PNG", "USA.PNG"),
+    ("SIZE", "WRL", "IUSN.DE", "SIZE.PNG", "WRL.PNG"),
+    ("SIZE", "JPN", "IUS4.DE", "SIZE.PNG", "JAPAN.PNG"),
+    ("VALUE", "EME", "5MVL.DE", "VALUE.PNG", "EME.PNG"),
+    ("VALUE", "EUR", "CEMS.DE", "VALUE.PNG", "EUR.PNG"),
+    ("VALUE", "USA", "QDVI.DE", "VALUE.PNG", "USA.PNG"),
+    ("VALUE", "WRL", "IS3S.DE", "VALUE.PNG", "WRL.PNG"),
+    ("AEX 25", "EUR", "IAEA.AS", "INDICEP.PNG", "EUR.PNG"),
+    ("CAC 40", "EUR", "GC40.DE", "INDICEP.PNG", "EUR.PNG"),
+    ("CSI 300", "CHN", "XCHA.DE", "INDICEP.PNG", "CHINA.PNG"),
+    ("DAX 40", "EUR", "EXS1.DE", "INDICEP.PNG", "EUR.PNG"),
+    ("DOW JONES INDUSTRIAL", "USA", "SXRU.DE", "INDICEP.PNG", "USA.PNG"),
+    ("FTSE 100", "EUR", "CEB4.DE", "INDICEP.PNG", "EUR.PNG"),
+    ("FTSE KOREA", "EME", "FLXK.DE", "INDICEP.PNG", "EME.PNG"),
+    ("FTSE MIB", "EUR", "SXRY.DE", "INDICEP.PNG", "EUR.PNG"),
+    ("IBEX 35", "EUR", "AMES.DE", "INDICEP.PNG", "EUR.PNG"),
+    ("MSCI ARABIA SAUDITA", "EME", "IUSS.DE", "INDICEP.PNG", "EME.PNG"),
+    ("MSCI AUSTRALIA", "WRL", "IBC6.DE", "INDICEP.PNG", "WRL.PNG"),
+    ("MSCI BRASIL", "EME", "LBRA.DE", "INDICEP.PNG", "EME.PNG"),
+    ("MSCI CANADA", "WRL", "SXR2.DE", "INDICEP.PNG", "WRL.PNG"),
+    ("MSCI CHINA", "CHN", "ICGA.DE", "INDICEP.PNG", "CHINA.PNG"),
+    ("MSCI HONG KONG", "CHN", "HKDE.AS", "INDICEP.PNG", "CHINA.PNG"),
+    ("MSCI INDIA", "EME", "QDV5.DE", "INDICEP.PNG", "EME.PNG"),
+    ("MSCI INDONESIA", "EME", "H4Z7.DE", "INDICEP.PNG", "EME.PNG"),
+    ("MSCI JAPAN HDG", "JPN", "IBCG.DE", "INDICEP.PNG", "JAPAN.PNG"),
+    ("MSCI JAPAN JPN", "JPN", "LCUJ.DE", "INDICEP.PNG", "JAPAN.PNG"),
+    ("MSCI MALAYSIA", "EME", "XCS3.DE", "INDICEP.PNG", "EME.PNG"),
+    ("MSCI MEXICO", "EME", "D5BI.DE", "INDICEP.PNG", "EME.PNG"),
+    ("MSCI PHILIPPINES", "EME", "XPQP.DE", "INDICEP.PNG", "EME.PNG"),
+    ("MSCI POLAND", "EUR", "IBCJ.DE", "INDICEP.PNG", "EUR.PNG"),
+    ("MSCI SINGAPORE", "EME", "XBAS.DE", "INDICEP.PNG", "EME.PNG"),
+    ("MSCI SUDÁFRICA", "EME", "IBC4.DE", "INDICEP.PNG", "EME.PNG"),
+    ("MSCI SWITZERLAND CHF", "EUR", "SW2CHB.SW", "INDICEP.PNG", "EUR.PNG"),
+    ("MSCI TAIWAN", "EME", "DBX5.DE", "INDICEP.PNG", "EME.PNG"),
+    ("MSCI THAILANDIA", "EME", "XCS4.DE", "INDICEP.PNG", "EME.PNG"),
+    ("MSCI TURQUÍA", "EUR", "LTUR.DE", "INDICEP.PNG", "EUR.PNG"),
+    ("NASDAQ 100", "USA", "SXRV.DE", "INDICEP.PNG", "USA.PNG"),
+    ("NASDAQ 100 HDG", "USA", "NQSE.DE", "INDICEP.PNG", "USA.PNG"),
+    ("NIKKEI 225", "WRL", "XDJP.DE", "INDICEP.PNG", "WRL.PNG"),
+    ("RUSSELL 2000", "USA", "ZPRR.DE", "INDICEP.PNG", "USA.PNG"),
+    ("S&P 500", "USA", "SXR8.DE", "INDICEP.PNG", "USA.PNG"),
+    ("S&P 500 EW", "USA", "XDEW.DE", "INDICEP.PNG", "USA.PNG"),
+    ("S&P 500 EW HDG", "USA", "XDEE.DE", "INDICEP.PNG", "USA.PNG"),
+    ("S&P 500 HDG", "USA", "IBCF.DE", "INDICEP.PNG", "USA.PNG"),
+    ("S&P 600", "USA", "SMLK.DE", "INDICEP.PNG", "USA.PNG"),
+    ("TOPIX", "WRL", "TPXE.PA", "INDICEP.PNG", "WRL.PNG"),
+    ("ACWI", "ALL", "VWCE.DE", "INDICES.PNG", "ALL.PNG"),
+    ("ACWI HDG", "ALL", "SPP1.DE", "INDICES.PNG", "ALL.PNG"),
+    ("MSCI AFRICA", "EME", "XMKA.DE", "INDICES.PNG", "EME.PNG"),
+    ("MSCI EMERGING ASIA", "EME", "AMEA.DE", "INDICES.PNG", "EME.PNG"),
+    ("MSCI EMERGING EX-CHINA", "EME", "EMXC.DE", "INDICES.PNG", "EME.PNG"),
+    ("MSCI EMERGING MARKETS", "EME", "IS3N.DE", "INDICES.PNG", "EME.PNG"),
+    ("MSCI LATINOAMERICA", "EME", "DBX3.DE", "INDICES.PNG", "EME.PNG"),
+    ("MSCI NORDIC", "EUR", "XDN0.DE", "INDICES.PNG", "EUR.PNG"),
+    ("MSCI PACIFIC-EX JAPAN", "EME", "18MM.DE", "INDICES.PNG", "EME.PNG"),
+    ("MSCI WORLD", "WRL", "EUNL.DE", "INDICES.PNG", "WRL.PNG"),
+    ("MSCI WORLD EW", "WRL", "MWEQ.DE", "INDICES.PNG", "WRL.PNG"),
+    ("MSCI WORLD EX-USA", "WRL", "EXUS.DE", "INDICES.PNG", "WRL.PNG"),
+    ("MSCI WORLD HDG", "WRL", "IBCH.DE", "INDICES.PNG", "WRL.PNG"),
+    ("STOXX 50", "EUR", "SXRT.DE", "INDICES.PNG", "EUR.PNG"),
+    ("STOXX 600", "EUR", "LYP6.DE", "INDICES.PNG", "EUR.PNG"),
+    ("COMMUNICATION SERVICES", "EUR", "SPYT.DE", "COMMUNICATIONS.PNG", "EUR.PNG"),
+    ("COMMUNICATION SERVICES", "USA", "IU5C.DE", "COMMUNICATIONS.PNG", "USA.PNG"),
+    ("COMMUNICATION SERVICES", "WRL", "TELW.PA", "COMMUNICATIONS.PNG", "WRL.PNG"),
+    ("CONSUMER DISCRETIONARY", "EUR", "SPYR.DE", "DISCRETIONARY.PNG", "EUR.PNG"),
+    ("CONSUMER DISCRETIONARY", "USA", "QDVK.DE", "DISCRETIONARY.PNG", "USA.PNG"),
+    ("CONSUMER DISCRETIONARY", "WRL", "WELJ.DE", "DISCRETIONARY.PNG", "WRL.PNG"),
+    ("CONSUMER STAPLES", "EUR", "SPYC.DE", "STAPLES.PNG", "EUR.PNG"),
+    ("CONSUMER STAPLES", "USA", "2B7D.DE", "STAPLES.PNG", "USA.PNG"),
+    ("CONSUMER STAPLES", "WRL", "WELW.DE", "STAPLES.PNG", "WRL.PNG"),
+    ("ENERGY", "EUR", "SPYN.DE", "ENERGY.PNG", "EUR.PNG"),
+    ("ENERGY", "USA", "QDVF.DE", "ENERGY.PNG", "USA.PNG"),
+    ("ENERGY", "WRL", "XDW0.DE", "ENERGY.PNG", "WRL.PNG"),
+    ("FINANCIALS", "EUR", "SPYZ.DE", "FINANCIALS.PNG", "EUR.PNG"),
+    ("FINANCIALS", "USA", "QDVH.DE", "FINANCIALS.PNG", "USA.PNG"),
+    ("FINANCIALS", "WRL", "WF1E.DE", "FINANCIALS.PNG", "WRL.PNG"),
+    ("HEALTH CARE", "EUR", "SPYH.DE", "HEALTH CARE.PNG", "EUR.PNG"),
+    ("HEALTH CARE", "USA", "QDVG.DE", "HEALTH CARE.PNG", "USA.PNG"),
+    ("HEALTH CARE", "WRL", "WELS.DE", "HEALTH CARE.PNG", "WRL.PNG"),
+    ("INDUSTRIALS", "EUR", "ESIN.DE", "INDUSTRIALS.PNG", "EUR.PNG"),
+    ("INDUSTRIALS", "USA", "2B7C.DE", "INDUSTRIALS.PNG", "USA.PNG"),
+    ("INDUSTRIALS", "WRL", "XDWI.DE", "INDUSTRIALS.PNG", "WRL.PNG"),
+    ("MATERIALS", "EUR", "SPYP.DE", "MATERIALS.PNG", "EUR.PNG"),
+    ("MATERIALS", "USA", "2B7B.DE", "MATERIALS.PNG", "USA.PNG"),
+    ("MATERIALS", "WRL", "XDWM.DE", "MATERIALS.PNG", "WRL.PNG"),
+    ("REAL ESTATE", "EUR", "IPRE.DE", "REIT.PNG", "EUR.PNG"),
+    ("REAL ESTATE", "USA", "IQQ7.DE", "REIT.PNG", "USA.PNG"),
+    ("REAL ESTATE", "WRL", "SPY2.DE", "REIT.PNG", "WRL.PNG"),
+    ("TECHNOLOGY", "CHN", "CBUK.DE", "TECHNOLOGY.PNG", "CHINA.PNG"),
+    ("TECHNOLOGY", "EME", "EMQQ.DE", "TECHNOLOGY.PNG", "EME.PNG"),
+    ("TECHNOLOGY", "EUR", "SPYK.DE", "TECHNOLOGY.PNG", "EUR.PNG"),
+    ("TECHNOLOGY", "USA", "QDVE.DE", "TECHNOLOGY.PNG", "USA.PNG"),
+    ("TECHNOLOGY", "WRL", "WELU.DE", "TECHNOLOGY.PNG", "WRL.PNG"),
+    ("TECHNOLOGY", "EME", "H41X.DE", "TECHNOLOGY.PNG", "INDIA.PNG"),
+    ("UTILITIES", "EUR", "SPYU.DE", "UTILITIES.PNG", "EUR.PNG"),
+    ("UTILITIES", "USA", "2B7A.DE", "UTILITIES.PNG", "USA.PNG"),
+    ("UTILITIES", "WRL", "WELD.DE", "UTILITIES.PNG", "WRL.PNG"),
+    ("AGEING POPULATION", "ALL", "2B77.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("AGRIBUSINESS", "ALL", "ISAG.MI", "THEMATIC.PNG", "ALL.PNG"),
+    ("AI ADOPTERS & APPLICATIONS", "ALL", "AIAA.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("AI INFRASTRUCTURE", "ALL", "AIFS.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("ARK INNOVATION", "WRL", "ARXK.DE", "THEMATIC.PNG", "WRL.PNG"),
+    ("CLEAN ENERGY TRANSITION", "ALL", "Q8Y0.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("CLOUD COMPUTING", "USA", "SKYE.AS", "THEMATIC.PNG", "USA.PNG"),
+    ("CYBER SECURITY", "WRL", "USPY.DE", "THEMATIC.PNG", "WRL.PNG"),
+    ("DATA CENTER", "ALL", "V9N.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("DIGITAL ENTERTAINMENT & EDUCATION", "ALL", "CBUN.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("DIGITAL PAYMENTS", "ALL", "DPGA.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("ELECTRIC VEHICLES & DRIVING TECH", "ALL", "IEVD.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("EUROPE DEFENSE", "EUR", "EDFS.DE", "THEMATIC.PNG", "EUR.PNG"),
+    ("EUROPEAN INFRASTRUCTURE", "EUR", "B41J.DE", "THEMATIC.PNG", "EUR.PNG"),
+    ("GLOBAL BLOCKCHAIN", "ALL", "BNXG.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("GLOBAL DEFENSE", "ALL", "4MMR.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("GLOBAL HYDROGEN", "ALL", "AMEE.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("GLOBAL INFRASTRUCTURE", "ALL", "CBUX.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("GLOBAL INVESTORS TRAVEL", "ALL", "7RIP.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("GLOBAL LUXURY", "ALL", "GLUX.MI", "THEMATIC.PNG", "ALL.PNG"),
+    ("GLOBAL TIMBER & FORESTRY", "ALL", "IUSB.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("HEALTHCARE INNOVATION", "ALL", "2B78.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("LITHIUM & BATTERY TECHNOLOGIES", "ALL", "LI7U.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("MEDICAL ROBOTICS", "ALL", "CIB0.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("METAVERSE", "ALL", "CBUV.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("MORNINGSTAR GLOBAL WIDE MOAT", "ALL", "VVGM.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("MORNINGSTAR US WIDE MOAT", "USA", "GMVM.DE", "THEMATIC.PNG", "USA.PNG"),
+    ("MSCI MILENNIALS", "ALL", "GENY.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("MSCI WATER", "WRL", "WATC.MI", "THEMATIC.PNG", "WRL.PNG"),
+    ("NASDAQ NEXT GENERATION 100", "USA", "EQQJ.DE", "THEMATIC.PNG", "USA.PNG"),
+    ("NASDAQ US BIOTECHNOLOGY", "USA", "2B70.DE", "THEMATIC.PNG", "USA.PNG"),
+    ("OIL SERVICES", "WRL", "V0IH.DE", "THEMATIC.PNG", "WRL.PNG"),
+    ("QUANTUM COMPUTING", "ALL", "QUTM.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("RARE EARTH & STRATEGIC METALS", "ALL", "VVMX.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("ROBOTICS & AI", "WRL", "GOAI.DE", "THEMATIC.PNG", "WRL.PNG"),
+    ("S&P 500 TOP 20", "USA", "IS20.DE", "THEMATIC.PNG", "USA.PNG"),
+    ("SEMICONDUCTOR", "ALL", "VVSM.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("SOLAR ENERGY", "ALL", "S0LR.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("SPACE INNOVATORS", "ALL", "JEDI.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("SUSTAINABLE FUTURE OF FOOD", "ALL", "RIZF.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("URANIUM & NUCLEAR TECHNOLOGIES", "ALL", "NUKL.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("VIDEO GAMING & ESPORTS", "ALL", "ESP0.DE", "THEMATIC.PNG", "ALL.PNG"),
+    ("WEB 3.0", "WRL", "M37R.DE", "THEMATIC.PNG", "WRL.PNG")
 ]
 
 
-# --- 3. FUNCIONES ---
-
-def get_image_base64(path):
+# --- 3. FUNCIONES DE IMAGEN ---
+def get_image_base64(path, scale=1.0):
     if not os.path.exists(path): return None
-    with open(path, "rb") as f: data = f.read()
+    try:
+        if scale != 1.0:
+            img = Image.open(path).convert("RGBA")
+            orig_w, orig_h = img.size
+            new_w = max(1, int(orig_w * scale))
+            new_h = max(1, int(orig_h * scale))
+            img_resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+            if scale < 1.0:
+                new_img = Image.new("RGBA", (orig_w, orig_h), (255, 255, 255, 0))
+                offset_x = (orig_w - new_w) // 2
+                offset_y = (orig_h - new_h) // 2
+                new_img.paste(img_resized, (offset_x, offset_y), img_resized)
+            else:
+                new_img = img_resized
+
+            buffered = io.BytesIO()
+            new_img.save(buffered, format="PNG")
+            data = buffered.getvalue()
+        else:
+            with open(path, "rb") as f:
+                data = f.read()
+    except Exception:
+        with open(path, "rb") as f:
+            data = f.read()
+
     return "data:image/png;base64," + base64.b64encode(data).decode()
+
+
+IMG_PATHS = {"PENGUIN": "penguin.png", "PIRANHA": "PIRANHA.png", "BENCH": "BENCH.PNG"}
+for item in ASSETS:
+    IMG_PATHS[item[3]] = item[3]
+    IMG_PATHS[item[4]] = item[4]
+
+# Escalas ajustadas
+cached_imgs = {}
+for img_name in IMG_PATHS.values():
+    scale = 1.0
+    if img_name in ["EME.PNG", "INDIA.PNG"]:
+        scale = 0.85
+    elif img_name == "ALL.PNG":
+        scale = 1.25
+    elif img_name == "HIGH YIELD.PNG":
+        scale = 0.80
+
+    cached_imgs[img_name] = get_image_base64(img_name, scale)
+
+
+# --- 4. FUNCIONES PRINCIPALES ---
+@st.cache_data(ttl=300)
+def load_data_and_history():
+    try:
+        bench = yf.Ticker(BENCHMARK).history(period="2y")['Close'].resample('W-FRI').last().dropna().tz_localize(None)
+    except:
+        return pd.DataFrame(), {}, []
+
+    rows, history_dict = [], {}
+    failed_tickers = []
+    bar = st.progress(0, text="Analizando mercado...")
+    total = len(ASSETS)
+
+    for i, (nombre, reg, tick, img_sec, img_reg) in enumerate(ASSETS):
+        bar.progress((i + 1) / total, text=f"{tick}...")
+        try:
+            hist = yf.Ticker(tick).history(period="2y")['Close']
+            if hist.empty:
+                failed_tickers.append(tick)
+                continue
+
+            d_curr, d_prev = float(hist.iloc[-1]), float(hist.iloc[-2])
+            day_pct = ((d_curr / d_prev) - 1) * 100
+
+            w_series = hist.resample('W-FRI').last().dropna().tz_localize(None)
+            w_curr = float(w_series.iloc[-1])
+            w_prev3m = float(w_series.iloc[-14]) if len(w_series) >= 14 else w_curr
+            m3_pct = ((w_curr / w_prev3m) - 1) * 100
+
+            rrg_data = [calculate_rrg_zscore(w_series, bench, o) for o in
+                        [0, OFFSET_1W, OFFSET_2W, OFFSET_3W, OFFSET_4W]]
+            history_dict[tick] = rrg_data
+
+            raw_scores = [5.0 + (d[1] * 0.12 + d[2] * 0.04) if d[0] != "Error" else 0.0 for d in rrg_data]
+            ordered_scores = raw_scores[::-1]
+            final_sc = np.average(ordered_scores, weights=[0.05, 0.1, 0.15, 0.25, 0.45])
+
+            bonus = sum([0.2 for k in range(1, 5) if ordered_scores[k] > ordered_scores[k - 1]])
+            final_sc = max(0, min(10, final_sc + bonus))
+
+            is_sec = cached_imgs.get(img_sec) or ""
+            is_reg = cached_imgs.get(img_reg) or ""
+            is_pro = ""
+
+            if tick == BENCHMARK:
+                is_pro = cached_imgs.get("BENCH.PNG") or ""
+            elif tick in MY_PORTFOLIO:
+                is_pro = cached_imgs.get("penguin.png") or ""
+            elif tick in PIRANHA_ETFS:
+                is_pro = cached_imgs.get("PIRANHA.png") or ""
+
+            pos_label = rrg_data[0][0]
+            pos_display = "🟩 Leading" if "Leading" in pos_label else "🟨 Weak" if "Weakening" in pos_label else "🟥 Lagging" if "Lagging" in pos_label else "🟦 Impr" if "Improving" in pos_label else pos_label
+
+            rows.append({
+                "Ver": (tick in MY_PORTFOLIO),
+                "Img_S": is_sec, "Img_R": is_reg, "Img_P": is_pro,
+                "Ticker": tick, "Nombre": nombre, "Region": reg,
+                "Score": float(final_sc),
+                "% Hoy": float(day_pct),
+                "% 3M": float(m3_pct),
+                "POS": pos_display,
+                "STR": float(rrg_data[0][1]),
+                "MOM": float(rrg_data[0][2])
+            })
+        except:
+            failed_tickers.append(tick)
+            continue
+
+    bar.empty()
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        cols_num = ["Score", "% Hoy", "% 3M", "STR", "MOM"]
+        for c in cols_num: df[c] = pd.to_numeric(df[c])
+        df = df.sort_values(by="Score", ascending=False).reset_index(drop=True)
+        df.insert(1, "#", range(1, len(df) + 1))
+    return df, history_dict, failed_tickers
 
 
 def calculate_rrg_zscore(p_ticker, p_bench, offset):
@@ -142,99 +390,21 @@ def calculate_rrg_zscore(p_ticker, p_bench, offset):
         return ("Error", 0.0, 0.0)
 
 
-@st.cache_data(ttl=3600)
-def load_data_and_history():
-    try:
-        bench = yf.Ticker(BENCHMARK).history(period="2y")['Close'].resample('W-FRI').last().dropna().tz_localize(None)
-    except:
-        return pd.DataFrame(), {}
+# --- 5. INTERFAZ ---
+col_logo, col_title = st.columns([1, 15])
+with col_logo:
+    if os.path.exists("PINGUINO.PNG"):
+        st.image("PINGUINO.PNG", width=60)
+    else:
+        st.header("🐧")
+with col_title:
+    st.header("PENGUIN PORTFOLIO")
 
-    rows, history_dict = [], {}
-    cached_imgs = {k: get_image_base64(v) for k, v in IMG_PATHS.items()}
+df, rrg_hist, failed_tickers = load_data_and_history()
 
-    bar = st.progress(0, text="Analizando mercado...")
-    total = len(ASSETS)
-
-    for i, (sec, reg, tick) in enumerate(ASSETS):
-        bar.progress((i + 1) / total, text=f"{tick}...")
-        try:
-            hist = yf.Ticker(tick).history(period="2y")['Close']
-            if hist.empty: continue
-
-            # Precios
-            d_curr, d_prev = float(hist.iloc[-1]), float(hist.iloc[-2])
-            day_pct = ((d_curr / d_prev) - 1) * 100
-
-            w_series = hist.resample('W-FRI').last().dropna().tz_localize(None)
-            w_curr = float(w_series.iloc[-1])
-            w_prev3m = float(w_series.iloc[-14]) if len(w_series) >= 14 else w_curr
-            m3_pct = ((w_curr / w_prev3m) - 1) * 100
-
-            # RRG Data
-            rrg_data = [calculate_rrg_zscore(w_series, bench, o) for o in
-                        [0, OFFSET_1W, OFFSET_2W, OFFSET_3W, OFFSET_4W]]
-            history_dict[tick] = rrg_data
-
-            # Score
-            raw_scores = [5.0 + (d[1] * 0.12 + d[2] * 0.04) if d[0] != "Error" else 0.0 for d in rrg_data]
-            ordered_scores = raw_scores[::-1]
-            final_sc = np.average(ordered_scores, weights=[0.05, 0.1, 0.15, 0.25, 0.45])
-
-            bonus = 0.0
-            for k in range(1, 5):
-                if ordered_scores[k] > ordered_scores[k - 1]: bonus += 0.2
-            final_sc = max(0, min(10, final_sc + bonus))
-
-            # Iconos
-            is_sec = cached_imgs.get(SECTOR_IMG_MAP.get(sec, "")) or ""
-            is_reg = cached_imgs.get(reg) or ""
-            is_pro = ""
-            if tick in MY_PORTFOLIO:
-                is_pro = cached_imgs.get("PENGUIN") or ""
-            elif "INDICE" in sec or "WORLD" in sec:
-                is_pro = cached_imgs.get("PIRANHA") or ""
-
-            # Posición
-            pos_label = rrg_data[0][0]
-            pos_display = pos_label
-            if "Leading" in pos_label:
-                pos_display = "🟩 Leading"
-            elif "Weakening" in pos_label:
-                pos_display = "🟨 Weak"
-            elif "Lagging" in pos_label:
-                pos_display = "🟥 Lagging"
-            elif "Improving" in pos_label:
-                pos_display = "🟦 Impr"
-
-            rows.append({
-                "Ver": (tick in MY_PORTFOLIO),
-                "Img_S": is_sec, "Img_R": is_reg, "Img_P": is_pro,
-                "Ticker": tick, "Sector": sec, "Region": reg,
-                "Score": float(final_sc),
-                "% Hoy": float(day_pct),
-                "% 3M": float(m3_pct),
-                "POS": pos_display,
-                "STR": float(rrg_data[0][1]),
-                "MOM": float(rrg_data[0][2])
-            })
-        except:
-            continue
-
-    bar.empty()
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        cols_num = ["Score", "% Hoy", "% 3M", "STR", "MOM"]
-        for c in cols_num:
-            df[c] = pd.to_numeric(df[c])
-
-        df = df.sort_values(by="Score", ascending=False).reset_index(drop=True)
-        df.insert(1, "#", range(1, len(df) + 1))
-    return df, history_dict
-
-
-# --- 4. INTERFAZ ---
-st.header("🐧 PENGUIN PORTFOLIO")
-df, rrg_hist = load_data_and_history()
+if failed_tickers:
+    st.warning(
+        f"Yahoo Finance no ha devuelto datos para {len(failed_tickers)} activo(s) y se han omitido: {', '.join(failed_tickers)}")
 
 if df.empty:
     st.error("Error de datos.")
@@ -242,26 +412,25 @@ if df.empty:
 
 st.caption("Sofía & Alberto 2026")
 
-# Configuración Columnas
 col_conf = {
-    "Ver": st.column_config.CheckboxColumn("Ver", width="small"),
-    "#": st.column_config.NumberColumn("#", width="small", format="%d"),
-    "Img_S": st.column_config.ImageColumn("Sec", width="small"),
-    "Img_R": st.column_config.ImageColumn("Reg", width="small"),
-    "Img_P": st.column_config.ImageColumn("👤", width="small"),
+    "Ver": st.column_config.CheckboxColumn("Ver"),
+    "#": st.column_config.NumberColumn("#", format="%d"),
+    "Img_S": st.column_config.ImageColumn("Sec"),
+    "Img_R": st.column_config.ImageColumn("Reg"),
+    "Img_P": st.column_config.ImageColumn("👤"),
     "Score": st.column_config.NumberColumn("Nota", format="%.1f"),
-    "% Hoy": st.column_config.NumberColumn("% Hoy", format="%.2f%%", width="medium"),
-    "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%", width="medium"),
+    "% Hoy": st.column_config.NumberColumn("% Hoy", format="%.2f%%"),
+    "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%"),
     "STR": st.column_config.NumberColumn("STR", format="%.2f"),
     "MOM": st.column_config.NumberColumn("MOM", format="%.2f"),
 }
 
-visible_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "Ticker", "Score", "% Hoy", "% 3M", "POS", "STR", "MOM"]
+visible_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "Ticker", "Nombre", "Score", "% Hoy", "% 3M", "POS", "STR",
+                "MOM"]
 
-# TABLA EDITABLE
 edited_df = st.data_editor(
     df,
-    use_container_width=True,
+    use_container_width=False,
     hide_index=True,
     column_order=visible_cols,
     column_config=col_conf,
@@ -291,8 +460,7 @@ if plot_tickers:
         pts_chron = list(reversed(pts))
         xs = np.array([p[0] for p in pts_chron])
         ys = np.array([p[1] for p in pts_chron])
-
-        all_x.extend(xs)
+        all_x.extend(xs);
         all_y.extend(ys)
 
         px, py = xs, ys
@@ -309,21 +477,18 @@ if plot_tickers:
         ax.plot(px, py, color=c, lw=2, alpha=0.8)
         ax.scatter(xs[:-1], ys[:-1], s=20, color=c, alpha=0.6)
 
-        # Etiqueta
         row_info = edited_df[edited_df['Ticker'] == t].iloc[0]
-        label = f" {row_info['Sector']} {row_info['Region']}"
+        label = f" {row_info['Nombre']} ({row_info['Region']})"
         fw, ec = 'normal', c
         if t in MY_PORTFOLIO:
-            label = "🐧" + label
+            label = "🐧 " + label
             fw, ec = 'bold', 'black'
 
         ax.scatter(xs[-1], ys[-1], s=120, color=c, edgecolors=ec, zorder=5)
         ax.text(xs[-1], ys[-1], label, color=c, fontweight=fw, fontsize=9)
 
-    # Lógica de Ejes Dinámicos
     if all_x and all_y:
         margin = 0.1
-
         x_min_dat, x_max_dat = min(all_x), max(all_x)
         x_rng = x_max_dat - x_min_dat if x_max_dat != x_min_dat else 1.0
         x_lim_min = x_min_dat - (x_rng * margin)
@@ -339,18 +504,13 @@ if plot_tickers:
         ax.set_xlim(x_lim_min, x_lim_max)
         ax.set_ylim(y_lim_min, y_lim_max)
 
-        w_right = max(0, x_lim_max)
-        h_top = max(0, y_lim_max)
+        w_right, h_top = max(0, x_lim_max), max(0, y_lim_max)
+        w_left, h_bot = min(0, x_lim_min), min(0, y_lim_min)
+
         ax.add_patch(Rectangle((0, 0), w_right, h_top, color='#e8f5e9', alpha=0.3, zorder=0))
-
-        h_bot = min(0, y_lim_min)
         ax.add_patch(Rectangle((0, 0), w_right, h_bot, color='#fffde7', alpha=0.3, zorder=0))
-
-        w_left = min(0, x_lim_min)
         ax.add_patch(Rectangle((0, 0), w_left, h_bot, color='#ffebee', alpha=0.3, zorder=0))
-
         ax.add_patch(Rectangle((0, 0), w_left, h_top, color='#e3f2fd', alpha=0.3, zorder=0))
-
         ax.axhline(0, c='gray', lw=1, zorder=1)
         ax.axvline(0, c='gray', lw=1, zorder=1)
 
