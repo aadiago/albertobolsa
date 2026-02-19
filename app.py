@@ -13,7 +13,7 @@ import io
 # --- 1. CONFIGURACIÓN ---
 st.set_page_config(layout="wide", page_title="PENGUIN PORTFOLIO", page_icon="🐧")
 
-# CSS: Centrado ajustado para que no rompa en dispositivos móviles
+# CSS: Ajustes para dispositivos táctiles
 st.markdown("""
     <style>
     div[data-testid="stDataFrame"] div[role="columnheader"] {
@@ -229,49 +229,52 @@ ASSETS = [
 ]
 
 
-# --- 3. FUNCIONES DE IMAGEN ---
-def get_image_base64(path, scale=1.0):
+# --- 3. FUNCIONES DE IMAGEN EXTREMA ---
+def get_image_base64(path, is_profile=False):
     if not os.path.exists(path): return ""
     try:
+        # A los Pingüinos/Pirañas/Bench los tratamos con cariño (son pocos)
+        if is_profile:
+            with open(path, "rb") as f: data = f.read()
+            return "data:image/png;base64," + base64.b64encode(data).decode()
+
+        # A los 356 Sectores y Regiones los ponemos a dieta extrema para los móviles
         img = Image.open(path).convert("RGBA")
 
-        # Tamaño de lienzo ultra pequeño. En los móviles se verá perfecto
-        # y cortamos el peso dramáticamente.
-        base_size = 32
-        target_w = max(1, int(base_size * scale))
-        target_h = max(1, int(base_size * scale))
+        # 1. Le quitamos el canal Alpha (transparencia) que ahoga la memoria gráfica
+        bg = Image.new("RGB", img.size, (255, 255, 255))
+        bg.paste(img, (0, 0), img)  # Usa la propia imagen como máscara de recorte
 
-        # Redimensionamos la imagen
-        img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+        # 2. La encogemos brutalmente (28x28)
+        bg.thumbnail((28, 28), Image.Resampling.LANCZOS)
 
+        # 3. La guardamos como JPEG en calidad 50%
         buffered = io.BytesIO()
-        # LA CLAVE DE TODO: Usamos el formato WEBP. Es 10 veces más ligero que PNG
-        # y permite a los móviles (Safari/Chrome) renderizar miles de imágenes sin pestañear.
-        img.save(buffered, format="WEBP", quality=80)
+        bg.save(buffered, format="JPEG", quality=50)
         data = buffered.getvalue()
 
-        return "data:image/webp;base64," + base64.b64encode(data).decode()
+        return "data:image/jpeg;base64," + base64.b64encode(data).decode()
+
     except Exception:
         return ""
 
 
-IMG_PATHS = {"PENGUIN": "penguin.png", "PIRANHA": "PIRANHA.png", "BENCH": "BENCH.PNG"}
+IMG_PATHS_SEC_REG = {}
 for item in ASSETS:
-    IMG_PATHS[item[3]] = item[3]
-    IMG_PATHS[item[4]] = item[4]
+    IMG_PATHS_SEC_REG[item[3]] = item[3]
+    IMG_PATHS_SEC_REG[item[4]] = item[4]
 
-# Escalas ajustadas
+IMG_PATHS_PROFILE = {"PENGUIN": "penguin.png", "PIRANHA": "PIRANHA.png", "BENCH": "BENCH.PNG"}
+
 cached_imgs = {}
-for img_name in IMG_PATHS.values():
-    scale = 1.0
-    if img_name in ["EME.PNG", "INDIA.PNG"]:
-        scale = 0.85
-    elif img_name == "ALL.PNG":
-        scale = 1.25
-    elif img_name == "HIGH YIELD.PNG":
-        scale = 0.80
 
-    cached_imgs[img_name] = get_image_base64(img_name, scale)
+# Procesar los Pingüinos como PNG
+for k, v in IMG_PATHS_PROFILE.items():
+    cached_imgs[v] = get_image_base64(v, is_profile=True)
+
+# Procesar Sectores y Regiones como JPEG
+for v in IMG_PATHS_SEC_REG.values():
+    cached_imgs[v] = get_image_base64(v, is_profile=False)
 
 
 # --- 4. FUNCIONES PRINCIPALES ---
@@ -406,9 +409,9 @@ st.caption("Sofía & Alberto 2026")
 col_conf = {
     "Ver": st.column_config.CheckboxColumn("Ver"),
     "#": st.column_config.NumberColumn("#", format="%d"),
-    "Img_S": st.column_config.ImageColumn("Sec"),
-    "Img_R": st.column_config.ImageColumn("Reg"),
-    "Img_P": st.column_config.ImageColumn("👤"),
+    "Img_S": st.column_config.ImageColumn("Sec", width="small"),
+    "Img_R": st.column_config.ImageColumn("Reg", width="small"),
+    "Img_P": st.column_config.ImageColumn("👤", width="small"),
     "Score": st.column_config.NumberColumn("Nota", format="%.1f"),
     "% Hoy": st.column_config.NumberColumn("% Hoy", format="%.2f%%"),
     "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%"),
