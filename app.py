@@ -13,17 +13,14 @@ import io
 # --- 1. CONFIGURACIÓN ---
 st.set_page_config(layout="wide", page_title="PENGUIN PORTFOLIO", page_icon="🐧")
 
-# CSS: Centrado agresivo y ajustes visuales
+# CSS: Centrado ajustado para que no rompa en dispositivos móviles
 st.markdown("""
     <style>
     div[data-testid="stDataFrame"] div[role="columnheader"] {
         justify-content: center !important; text-align: center !important;
     }
     div[data-testid="stDataFrame"] div[role="gridcell"] {
-        justify-content: center !important; text-align: center !important; display: flex !important;
-    }
-    div[data-testid="stDataFrame"] div[role="gridcell"] > div {
-        justify-content: center !important; text-align: center !important; margin: auto !important;
+        justify-content: center !important; text-align: center !important;
     }
     div[data-testid="stDataFrame"] td img {
         display: block; margin-left: auto; margin-right: auto;
@@ -238,29 +235,23 @@ def get_image_base64(path, scale=1.0):
     try:
         img = Image.open(path).convert("RGBA")
 
-        # 1. FORZAMOS TAMAÑO ENANO: Máximo 40x40 píxeles.
-        # Esto reduce el peso de la imagen un 95% para que los móviles no colapsen.
-        max_size = 40
-        img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+        # Tamaño de lienzo ultra pequeño. En los móviles se verá perfecto
+        # y cortamos el peso dramáticamente.
+        base_size = 32
+        target_w = max(1, int(base_size * scale))
+        target_h = max(1, int(base_size * scale))
 
-        orig_w, orig_h = img.size
-        new_w = max(1, int(orig_w * scale))
-        new_h = max(1, int(orig_h * scale))
-        img_resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-
-        # 2. Lienzo transparente miniatura
-        new_img = Image.new("RGBA", (max_size, max_size), (255, 255, 255, 0))
-        offset_x = (max_size - new_w) // 2
-        offset_y = (max_size - new_h) // 2
-        new_img.paste(img_resized, (offset_x, offset_y), img_resized)
+        # Redimensionamos la imagen
+        img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
 
         buffered = io.BytesIO()
-        new_img.save(buffered, format="PNG", optimize=True)
+        # LA CLAVE DE TODO: Usamos el formato WEBP. Es 10 veces más ligero que PNG
+        # y permite a los móviles (Safari/Chrome) renderizar miles de imágenes sin pestañear.
+        img.save(buffered, format="WEBP", quality=80)
         data = buffered.getvalue()
 
-        return "data:image/png;base64," + base64.b64encode(data).decode()
+        return "data:image/webp;base64," + base64.b64encode(data).decode()
     except Exception:
-        # IMPORTANTE: Ya no mandamos la imagen rota original para evitar crasheos.
         return ""
 
 
@@ -415,9 +406,9 @@ st.caption("Sofía & Alberto 2026")
 col_conf = {
     "Ver": st.column_config.CheckboxColumn("Ver"),
     "#": st.column_config.NumberColumn("#", format="%d"),
-    "Img_S": st.column_config.ImageColumn("Sec", width="small"),  # Obligamos al móvil a no aplastar la columna
-    "Img_R": st.column_config.ImageColumn("Reg", width="small"),  # Obligamos al móvil a no aplastar la columna
-    "Img_P": st.column_config.ImageColumn("👤", width="small"),
+    "Img_S": st.column_config.ImageColumn("Sec"),
+    "Img_R": st.column_config.ImageColumn("Reg"),
+    "Img_P": st.column_config.ImageColumn("👤"),
     "Score": st.column_config.NumberColumn("Nota", format="%.1f"),
     "% Hoy": st.column_config.NumberColumn("% Hoy", format="%.2f%%"),
     "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%"),
