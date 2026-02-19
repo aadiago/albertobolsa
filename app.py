@@ -7,33 +7,36 @@ from matplotlib.patches import Rectangle
 from scipy.interpolate import make_interp_spline
 import base64
 import os
+from PIL import Image
+import io
 
 # --- 1. CONFIGURACIÓN ---
 st.set_page_config(layout="wide", page_title="PENGUIN PORTFOLIO", page_icon="🐧")
 
-# CSS: Forzamos el centrado y un tamaño fijo pequeño para que el móvil no sufra
+# CSS: Forzamos al navegador a renderizar las imágenes de las celdas
 st.markdown("""
     <style>
     div[data-testid="stDataFrame"] div[role="columnheader"] { justify-content: center !important; text-align: center !important; }
-    div[data-testid="stDataFrame"] div[role="gridcell"] { justify-content: center !important; text-align: center !important; }
+    div[data-testid="stDataFrame"] div[role="gridcell"] { justify-content: center !important; text-align: center !important; display: flex !important; }
     div[data-testid="stDataFrame"] td img { 
         display: block !important; 
-        margin: auto !important; 
-        width: 24px !important; 
-        height: 24px !important; 
+        max-height: 25px !important; 
+        width: auto !important;
+        image-rendering: -webkit-optimize-contrast !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
 # --- 2. CONSTANTES ---
 BENCHMARK = "MWEQ.DE"
-RRG_PERIOD_TREND, RRG_PERIOD_MOM = 26, 4
+RRG_PERIOD_TREND = 26
+RRG_PERIOD_MOM = 4
 OFFSET_1W, OFFSET_2W, OFFSET_3W, OFFSET_4W = -1, -2, -3, -4
 
 MY_PORTFOLIO = ["QDVF.DE", "JREM.DE", "XDWI.DE", "SPYH.DE", "XDWM.DE", "XDW0.DE"]
 PIRANHA_ETFS = ["SXR8.DE", "XDEW.DE", "XDEE.DE", "IBCF.DE"]
 
-# --- LISTA DE ACTIVOS (Tu lista completa de 178) ---
+# --- LISTA DE ACTIVOS ---
 ASSETS = [
     ("AGGREGATE HDG", "EME", "XEMB.DE", "BONDS.PNG", "EME.PNG"),
     ("AGGREGATE HDG", "WRL", "DBZB.DE", "BONDS.PNG", "WRL.PNG"),
@@ -216,25 +219,28 @@ ASSETS = [
 ]
 
 
-# --- 3. LECTURA DE IMAGEN (VERSION LIGERA) ---
-@st.cache_data
+# --- 3. LECTURA DE IMÁGENES ---
+@st.cache_resource
 def get_img(path):
     if not os.path.exists(path): return ""
-    with open(path, "rb") as f:
-        return f"data:image/png;base64,{base64.b64encode(f.read()).decode()}"
+    try:
+        with open(path, "rb") as f:
+            return "data:image/png;base64," + base64.b64encode(f.read()).decode()
+    except:
+        return ""
 
 
-# --- 4. FUNCIONES ---
-def calculate_rrg(p_ticker, p_bench, offset):
+# --- 4. FUNCIONES PRINCIPALES ---
+def calculate_rrg_zscore(p_ticker, p_bench, offset):
     try:
         df = pd.DataFrame({'t': p_ticker, 'b': p_bench}).dropna()
         if len(df) < 32: return ("Error", 0.0, 0.0)
         rs = (df['t'] / df['b']) * 100
-        cut = rs if offset == 0 else rs.iloc[:offset]
-        m_l, s_l = cut.rolling(26).mean().iloc[-1], cut.rolling(26).std().iloc[-1]
-        m_s, s_s = cut.rolling(4).mean().iloc[-1], cut.rolling(4).std().iloc[-1]
-        sx = ((cut.iloc[-1] - m_l) / (s_l if s_l else 1)) * 10
-        my = ((cut.iloc[-1] - m_s) / (s_s if s_s else 1)) * 10
+        rs_cut = rs if offset == 0 else rs.iloc[:offset]
+        m_l, s_l = rs_cut.rolling(RRG_PERIOD_TREND).mean().iloc[-1], rs_cut.rolling(RRG_PERIOD_TREND).std().iloc[-1]
+        m_s, s_s = rs_cut.rolling(RRG_PERIOD_MOM).mean().iloc[-1], rs_cut.rolling(RRG_PERIOD_MOM).std().iloc[-1]
+        sx = ((rs_cut.iloc[-1] - m_l) / (s_l if s_l else 1)) * 10
+        my = ((rs_cut.iloc[-1] - m_s) / (s_s if s_s else 1)) * 10
         lbl = "Leading" if sx >= 0 and my >= 0 else "Weakening" if sx >= 0 and my < 0 else "Lagging" if sx < 0 and my < 0 else "Improving"
         return (lbl, float(sx), float(my))
     except:
@@ -247,68 +253,88 @@ def load_data():
         bench = yf.Ticker(BENCHMARK).history(period="2y")['Close'].resample('W-FRI').last().dropna().tz_localize(None)
     except:
         return pd.DataFrame(), {}
-    rows, h_dict = [], {}
-    bar = st.progress(0, "🐧 Analizando mercado...")
+
+    rows, hist_dict = [], {}
+    bar = st.progress(0, "Actualizando precios...")
     for i, (nom, reg, tick, isec, ireg) in enumerate(ASSETS):
         bar.progress((i + 1) / len(ASSETS))
         try:
             h = yf.Ticker(tick).history(period="2y")['Close']
             if h.empty: continue
+            d_pct = ((h.iloc[-1] / h.iloc[-2]) - 1) * 100
             ws = h.resample('W-FRI').last().dropna().tz_localize(None)
-            rrg = [calculate_rrg(ws, bench, o) for o in [0, -1, -2, -3, -4]]
-            h_dict[tick] = rrg
+            m3 = ((ws.iloc[-1] / ws.iloc[-14]) - 1) * 100 if len(ws) >= 14 else 0.0
+            rrg = [calculate_rrg_zscore(ws, bench, o) for o in [0, OFFSET_1W, OFFSET_2W, OFFSET_3W, OFFSET_4W]]
+            hist_dict[tick] = rrg
             scs = [5.0 + (d[1] * 0.12 + d[2] * 0.04) for d in rrg if d[0] != "Error"]
             fsc = max(0, min(10, np.average(scs[::-1], weights=[0.05, 0.1, 0.15, 0.25, 0.45]) if scs else 0))
 
-            p_img = "BENCH.PNG" if tick == BENCHMARK else "penguin.png" if tick in MY_PORTFOLIO else "PIRANHA.png" if tick in PIRANHA_ETFS else ""
+            ip = get_img("BENCH.PNG") if tick == BENCHMARK else get_img(
+                "penguin.png") if tick in MY_PORTFOLIO else get_img("PIRANHA.png") if tick in PIRANHA_ETFS else ""
 
             rows.append({
-                "Ver": (tick in MY_PORTFOLIO), "Sec": get_img(isec), "Reg": get_img(ireg),
-                "👤": get_img(p_img) if p_img else "",
-                "Ticker": tick, "Nombre": nom, "Score": round(fsc, 1),
-                "% Hoy": round(((h.iloc[-1] / h.iloc[-2]) - 1) * 100, 2),
-                "POS": rrg[0][0]
+                "Ver": (tick in MY_PORTFOLIO), "Img_S": get_img(isec), "Img_R": get_img(ireg), "Img_P": ip,
+                "Ticker": tick, "Nombre": nom, "Reg": reg, "Score": round(fsc, 1),
+                "% Hoy": round(d_pct, 2), "% 3M": round(m3, 2), "POS": rrg[0][0], "STR": rrg[0][1], "MOM": rrg[0][2]
             })
         except:
             continue
-    return pd.DataFrame(rows).sort_values("Score", ascending=False).reset_index(drop=True), h_dict
+    bar.empty()
+    df = pd.DataFrame(rows).sort_values("Score", ascending=False).reset_index(drop=True)
+    df.insert(1, "#", range(1, len(df) + 1))
+    return df, hist_dict
 
 
 # --- 5. INTERFAZ ---
-c1, c2 = st.columns([1, 15])
-with c1:
+col1, col2 = st.columns([1, 15])
+with col1:
     if os.path.exists("PINGUINO.PNG"): st.image("PINGUINO.PNG", width=60)
-with c2: st.header("PENGUIN PORTFOLIO")
+with col2: st.header("PENGUIN PORTFOLIO")
 
 df, rrg_hist = load_data()
+st.caption("Sofía & Alberto 2026")
 
 conf = {
     "Ver": st.column_config.CheckboxColumn("Ver"),
-    "Sec": st.column_config.ImageColumn("Sec"),
-    "Reg": st.column_config.ImageColumn("Reg"),
-    "👤": st.column_config.ImageColumn("👤"),
+    "Img_S": st.column_config.ImageColumn("Sec"),
+    "Img_R": st.column_config.ImageColumn("Reg"),
+    "Img_P": st.column_config.ImageColumn("👤"),
     "Score": st.column_config.NumberColumn("Nota"),
     "% Hoy": st.column_config.NumberColumn("% Hoy", format="%.2f%%"),
+    "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%"),
 }
-v_cols = ["Ver", "Sec", "Reg", "👤", "Ticker", "Nombre", "Score", "% Hoy", "POS"]
 
-st.data_editor(df, hide_index=True, column_order=v_cols, column_config=conf, disabled=[c for c in v_cols if c != "Ver"],
-               height=500)
+v_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "Ticker", "Nombre", "Score", "% Hoy", "% 3M", "POS"]
+
+edited_df = st.data_editor(df, use_container_width=False, hide_index=True, column_order=v_cols, column_config=conf,
+                           disabled=[c for c in v_cols if c != "Ver"], height=500)
 
 # --- GRÁFICA ---
-plot_t = st.multiselect("Activos en Gráfica", df["Ticker"].tolist(), default=MY_PORTFOLIO)
+plot_t = edited_df[edited_df["Ver"] == True]["Ticker"].tolist()
+st.divider()
+st.subheader(f"📈 Gráfico RRG")
+
 if plot_t:
     fig, ax = plt.subplots(figsize=(10, 8))
-    for t in plot_t:
-        pts = [(r[1], r[2]) for r in rrg_hist.get(t, []) if r[0] != "Error"][::-1]
+    for i, t in enumerate(plot_t):
+        raw = rrg_hist.get(t, [])
+        pts = [(r[1], r[2]) for r in raw if r[0] != "Error"][::-1]
         if len(pts) < 2: continue
         xs, ys = np.array([p[0] for p in pts]), np.array([p[1] for p in pts])
         if len(xs) >= 3:
             tr = np.arange(len(xs))
             td = np.linspace(0, len(xs) - 1, 100)
-            xs, ys = make_interp_spline(tr, xs, k=2)(td), make_interp_spline(tr, ys, k=2)(td)
-        ax.plot(xs, ys, lw=2);
-        ax.scatter(xs[-1], ys[-1], s=100)
+            xs = make_interp_spline(tr, xs, k=2)(td)
+            ys = make_interp_spline(tr, ys, k=2)(td)
+        ax.plot(xs, ys, lw=2, alpha=0.8)
+        ax.scatter(xs[-1], ys[-1], s=120)
+        row = edited_df[edited_df['Ticker'] == t].iloc[0]
+        ax.text(xs[-1], ys[-1], f" {row['Nombre']}", fontsize=9)
+
     ax.axhline(0, c='gray', lw=1);
     ax.axvline(0, c='gray', lw=1)
+    ax.add_patch(Rectangle((0, 0), 20, 20, color='green', alpha=0.1))
+    ax.add_patch(Rectangle((-20, 0), 20, 20, color='blue', alpha=0.1))
+    ax.add_patch(Rectangle((-20, -20), 20, 20, color='red', alpha=0.1))
+    ax.add_patch(Rectangle((0, -20), 20, 20, color='yellow', alpha=0.1))
     st.pyplot(fig)
