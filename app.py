@@ -233,31 +233,37 @@ ASSETS = [
 
 
 # --- 3. FUNCIONES DE IMAGEN ---
-def get_image_base64(path, scale=1.0):
+def get_image_base64(path, scale=1.0, max_size=45):
     if not os.path.exists(path): return None
     try:
-        if scale != 1.0:
-            img = Image.open(path).convert("RGBA")
-            orig_w, orig_h = img.size
-            new_w = max(1, int(orig_w * scale))
-            new_h = max(1, int(orig_h * scale))
-            img_resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        # Abrimos la imagen
+        img = Image.open(path).convert("RGBA")
 
-            if scale < 1.0:
-                new_img = Image.new("RGBA", (orig_w, orig_h), (255, 255, 255, 0))
-                offset_x = (orig_w - new_w) // 2
-                offset_y = (orig_h - new_h) // 2
-                new_img.paste(img_resized, (offset_x, offset_y), img_resized)
-            else:
-                new_img = img_resized
+        # 1. FORZAR TAMAÑO MINIATURA (Evita que los móviles colapsen por falta de RAM)
+        img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
 
-            buffered = io.BytesIO()
-            new_img.save(buffered, format="PNG")
-            data = buffered.getvalue()
+        # 2. APLICAR TU ESCALA PERSONALIZADA
+        orig_w, orig_h = img.size
+        new_w = max(1, int(orig_w * scale))
+        new_h = max(1, int(orig_h * scale))
+        img_resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+        # Si la hacemos más pequeña, le ponemos un fondo transparente para que no pierda el centrado
+        if scale < 1.0:
+            new_img = Image.new("RGBA", (orig_w, orig_h), (255, 255, 255, 0))
+            offset_x = (orig_w - new_w) // 2
+            offset_y = (orig_h - new_h) // 2
+            new_img.paste(img_resized, (offset_x, offset_y), img_resized)
         else:
-            with open(path, "rb") as f:
-                data = f.read()
+            new_img = img_resized
+
+        # Guardar en memoria optimizada
+        buffered = io.BytesIO()
+        new_img.save(buffered, format="PNG", optimize=True)
+        data = buffered.getvalue()
+
     except Exception:
+        # Si falla el procesado, la mandamos tal cual
         with open(path, "rb") as f:
             data = f.read()
 
