@@ -233,42 +233,35 @@ ASSETS = [
 
 
 # --- 3. FUNCIONES DE IMAGEN ---
-def get_image_base64(path, scale=1.0, max_size=32):
-    if not os.path.exists(path): return None
+def get_image_base64(path, scale=1.0):
+    if not os.path.exists(path): return ""
     try:
-        # Abrimos la imagen
         img = Image.open(path).convert("RGBA")
 
-        # 1. FORZAR TAMAÑO MINIATURA (Clave para que no colapse la memoria del móvil)
+        # 1. FORZAMOS TAMAÑO ENANO: Máximo 40x40 píxeles.
+        # Esto reduce el peso de la imagen un 95% para que los móviles no colapsen.
+        max_size = 40
         img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
 
-        # 2. APLICAR TU ESCALA PERSONALIZADA
         orig_w, orig_h = img.size
         new_w = max(1, int(orig_w * scale))
         new_h = max(1, int(orig_h * scale))
         img_resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
-        # Si la hacemos más pequeña, le ponemos un fondo transparente para centrarla
-        if scale < 1.0:
-            new_img = Image.new("RGBA", (orig_w, orig_h), (255, 255, 255, 0))
-            offset_x = (orig_w - new_w) // 2
-            offset_y = (orig_h - new_h) // 2
-            new_img.paste(img_resized, (offset_x, offset_y), img_resized)
-        else:
-            new_img = img_resized
-
-        # 3. COMPRESIÓN EXTREMA: reducimos colores para que pese un 80% menos
-        new_img = new_img.convert("P", palette=Image.ADAPTIVE, colors=64).convert("RGBA")
+        # 2. Lienzo transparente miniatura
+        new_img = Image.new("RGBA", (max_size, max_size), (255, 255, 255, 0))
+        offset_x = (max_size - new_w) // 2
+        offset_y = (max_size - new_h) // 2
+        new_img.paste(img_resized, (offset_x, offset_y), img_resized)
 
         buffered = io.BytesIO()
         new_img.save(buffered, format="PNG", optimize=True)
         data = buffered.getvalue()
 
+        return "data:image/png;base64," + base64.b64encode(data).decode()
     except Exception:
-        # Si ocurre un error leyendo la imagen, devolvemos None para no saturar con errores
-        return None
-
-    return "data:image/png;base64," + base64.b64encode(data).decode()
+        # IMPORTANTE: Ya no mandamos la imagen rota original para evitar crasheos.
+        return ""
 
 
 IMG_PATHS = {"PENGUIN": "penguin.png", "PIRANHA": "PIRANHA.png", "BENCH": "BENCH.PNG"}
@@ -422,9 +415,9 @@ st.caption("Sofía & Alberto 2026")
 col_conf = {
     "Ver": st.column_config.CheckboxColumn("Ver"),
     "#": st.column_config.NumberColumn("#", format="%d"),
-    "Img_S": st.column_config.ImageColumn("Sec"),
-    "Img_R": st.column_config.ImageColumn("Reg"),
-    "Img_P": st.column_config.ImageColumn("👤"),
+    "Img_S": st.column_config.ImageColumn("Sec", width="small"),  # Obligamos al móvil a no aplastar la columna
+    "Img_R": st.column_config.ImageColumn("Reg", width="small"),  # Obligamos al móvil a no aplastar la columna
+    "Img_P": st.column_config.ImageColumn("👤", width="small"),
     "Score": st.column_config.NumberColumn("Nota", format="%.1f"),
     "% Hoy": st.column_config.NumberColumn("% Hoy", format="%.2f%%"),
     "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%"),
