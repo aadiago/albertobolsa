@@ -40,7 +40,7 @@ OFFSET_4W = -4
 
 MY_PORTFOLIO = [
     "QDVF.DE", "JREM.DE", "XDWI.DE",
-    "SPYU.DE", "XDWM.DE", "XDW0.DE"
+    "SPYH.DE", "XDWM.DE", "XDW0.DE"
 ]
 
 # AÑADIDO: "PHY": "phy.png"
