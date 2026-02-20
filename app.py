@@ -218,25 +218,54 @@ ASSETS = [
     ("WEB 3.0", "WRL", "M37R.DE", "THEMATIC.PNG", "WRL.PNG")
 ]
 
-# --- 3. LECTURA DE IMÁGENES (OPTIMIZADA) ---
-@st.cache_resource
-def get_img(path):
-    if not os.path.exists(path): return ""
+# --- 3. LECTURA DE IMÁGENES (LOCAL ESTRICTO) ---
+
+# Calculamos la ruta absoluta de la carpeta donde está este .py
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Diccionario de Python para guardar en memoria las imágenes reducidas
+_img_cache = {}
+
+def get_img(filename):
+    if not filename: 
+        return ""
+        
+    # Si ya la hemos convertido antes, la sacamos de la memoria al instante
+    if filename in _img_cache:
+        return _img_cache[filename]
+        
+    # Construimos la ruta absoluta e inamovible al archivo
+    filepath = os.path.join(BASE_DIR, filename)
+    
+    # CHIVATO: Si no encuentra la imagen, devuelve un cuadrado rojo SVG
+    cuadrado_rojo = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><rect width='20' height='20' fill='red'/></svg>"
+    
+    if not os.path.exists(filepath):
+        return cuadrado_rojo
+        
     try:
-        # Abrimos la imagen con Pillow
-        img = Image.open(path)
+        # Abrimos la imagen
+        img = Image.open(filepath)
         
-        # Reducimos al vuelo para que no pese casi nada (32x32 píxeles)
-        img.thumbnail((32, 32)) 
+        # Convertimos a formato RGBA por si hay PNGs con transparencias conflictivas
+        if img.mode != 'RGBA':
+            img = img.convert('RGBA')
+            
+        # Miniaturizamos radicalmente a 25x25 px
+        img.thumbnail((25, 25)) 
         
-        # Lo guardamos en memoria RAM como PNG
         buffered = io.BytesIO()
         img.save(buffered, format="PNG", optimize=True)
         
-        # Lo pasamos a Base64
-        return "data:image/png;base64," + base64.b64encode(buffered.getvalue()).decode()
-    except:
-        return ""
+        b64_str = "data:image/png;base64," + base64.b64encode(buffered.getvalue()).decode()
+        
+        # Guardamos en nuestro caché manual
+        _img_cache[filename] = b64_str
+        return b64_str
+        
+    except Exception as e:
+        # Si hay un error leyendo el archivo (corrupto, etc), mostramos el cuadrado rojo
+        return cuadrado_rojo
 
 # --- 4. FUNCIONES PRINCIPALES ---
 def calculate_rrg_zscore(p_ticker, p_bench, offset):
@@ -294,7 +323,10 @@ def load_data():
 # --- 5. INTERFAZ ---
 col1, col2 = st.columns([1, 15])
 with col1:
-    if os.path.exists("PINGUINO.PNG"): st.image("PINGUINO.PNG", width=60)
+    # Aseguramos que el logo también use la ruta absoluta para no perderse
+    pinguino_path = os.path.join(BASE_DIR, "PINGUINO.PNG")
+    if os.path.exists(pinguino_path): 
+        st.image(pinguino_path, width=60)
 with col2: st.header("PENGUIN PORTFOLIO")
 
 df, rrg_hist = load_data()
