@@ -13,7 +13,7 @@ import io
 # --- 1. CONFIGURACIÓN ---
 st.set_page_config(layout="wide", page_title="PENGUIN PORTFOLIO", page_icon="🐧")
 
-# CSS: Estilos para la tabla y las imágenes
+# CSS: Forzamos al navegador a renderizar las imágenes de las celdas
 st.markdown("""
     <style>
     div[data-testid="stDataFrame"] div[role="columnheader"] { justify-content: center !important; text-align: center !important; }
@@ -37,7 +37,6 @@ MY_PORTFOLIO = ["QDVF.DE", "JREM.DE", "XDWI.DE", "SPYH.DE", "XDWM.DE", "LBRA.DE"
 PIRANHA_ETFS = ["SXR8.DE", "XDEW.DE", "XDEE.DE", "IBCF.DE"]
 
 # --- LISTA DE ACTIVOS ---
-# (Tu lista completa de 179 activos)
 ASSETS = [
     ("AGGREGATE HDG", "EME", "XEMB.DE", "BONDS.PNG", "EME.PNG"),
     ("AGGREGATE HDG", "WRL", "DBZB.DE", "BONDS.PNG", "WRL.PNG"),
@@ -223,7 +222,6 @@ ASSETS = [
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _img_cache = {}
 
-# Escaneamos la carpeta para ignorar mayúsculas/minúsculas
 try:
     archivos_reales = {f.lower(): f for f in os.listdir(BASE_DIR)}
 except:
@@ -234,13 +232,11 @@ def get_img(filename):
     if filename in _img_cache: return _img_cache[filename]
     
     nombre_lower = filename.lower()
-    # CHIVATO NARANJA (No existe)
     if nombre_lower not in archivos_reales:
         return "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><rect width='20' height='20' fill='orange'/></svg>"
         
     filepath = os.path.join(BASE_DIR, archivos_reales[nombre_lower])
     try:
-        # Bloque 'with' para cerrar el archivo al instante y no saturar
         with Image.open(filepath) as img:
             if img.mode != 'RGBA': img = img.convert('RGBA')
             img.thumbnail((25, 25)) 
@@ -250,7 +246,6 @@ def get_img(filename):
         _img_cache[filename] = b64_str
         return b64_str
     except:
-        # CHIVATO NEGRO (Corrupto o bloqueado)
         return "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><rect width='20' height='20' fill='black'/></svg>"
 
 # --- 4. FUNCIONES PRINCIPALES ---
@@ -309,7 +304,6 @@ def load_data():
 # --- 5. INTERFAZ ---
 col1, col2 = st.columns([1, 15])
 with col1:
-    # Buscador insensible a mayúsculas para el pingüino de la cabecera
     nombre_ping = "pinguino.png"
     if nombre_ping in archivos_reales:
         st.image(os.path.join(BASE_DIR, archivos_reales[nombre_ping]), width=60)
@@ -357,9 +351,29 @@ if plot_t:
 
     ax.axhline(0, c='gray', lw=1)
     ax.axvline(0, c='gray', lw=1)
-    # Usamos rectángulos gigantes (100x100) para cubrir todo el fondo siempre
-    ax.add_patch(Rectangle((0, 0), 100, 100, color='green', alpha=0.1))     # Leading
-    ax.add_patch(Rectangle((-100, 0), 100, 100, color='blue', alpha=0.1))   # Improving
-    ax.add_patch(Rectangle((-100, -100), 100, 100, color='red', alpha=0.1)) # Lagging
-    ax.add_patch(Rectangle((0, -100), 100, 100, color='yellow', alpha=0.1)) # Weakening
+
+    # 1. PREGUNTAMOS A MATPLOTLIB LOS BORDES DEL GRÁFICO (AUTO-ESCALADOS)
+    xmin, xmax = ax.get_xlim()
+    ymin, ymax = ax.get_ylim()
+
+    # 2. NOS ASEGURAMOS DE QUE LOS BORDES INCLUYAN EL (0,0) PARA DIBUJAR BIEN LOS CUADRANTES
+    xmin = min(xmin, 0)
+    xmax = max(xmax, 0)
+    ymin = min(ymin, 0)
+    ymax = max(ymax, 0)
+
+    # 3. DIBUJAMOS LOS COLORES EXACTAMENTE HASTA LOS BORDES DE LA PANTALLA
+    # Cuadrante Superior Derecho (Verde)
+    ax.add_patch(Rectangle((0, 0), xmax, ymax, color='green', alpha=0.1))
+    # Cuadrante Superior Izquierdo (Azul)
+    ax.add_patch(Rectangle((xmin, 0), abs(xmin), ymax, color='blue', alpha=0.1))
+    # Cuadrante Inferior Izquierdo (Rojo)
+    ax.add_patch(Rectangle((xmin, ymin), abs(xmin), abs(ymin), color='red', alpha=0.1))
+    # Cuadrante Inferior Derecho (Amarillo)
+    ax.add_patch(Rectangle((0, ymin), xmax, abs(ymin), color='yellow', alpha=0.1))
+
+    # 4. LE DECIMOS A MATPLOTLIB QUE NO SE ALEJE MÁS DE LOS BORDES ORIGINALES
+    ax.set_xlim(xmin, xmax)
+    ax.set_ylim(ymin, ymax)
+
     st.pyplot(fig)
