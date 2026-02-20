@@ -13,7 +13,7 @@ import io
 # --- 1. CONFIGURACIÓN ---
 st.set_page_config(layout="wide", page_title="PENGUIN PORTFOLIO", page_icon="🐧")
 
-# CSS: Forzamos al navegador a renderizar las imágenes de las celdas
+# CSS: Estilos para la tabla y las imágenes
 st.markdown("""
     <style>
     div[data-testid="stDataFrame"] div[role="columnheader"] { justify-content: center !important; text-align: center !important; }
@@ -37,6 +37,7 @@ MY_PORTFOLIO = ["QDVF.DE", "JREM.DE", "XDWI.DE", "SPYH.DE", "XDWM.DE", "LBRA.DE"
 PIRANHA_ETFS = ["SXR8.DE", "XDEW.DE", "XDEE.DE", "IBCF.DE"]
 
 # --- LISTA DE ACTIVOS ---
+# (Tu lista completa de 179 activos)
 ASSETS = [
     ("AGGREGATE HDG", "EME", "XEMB.DE", "BONDS.PNG", "EME.PNG"),
     ("AGGREGATE HDG", "WRL", "DBZB.DE", "BONDS.PNG", "WRL.PNG"),
@@ -222,47 +223,34 @@ ASSETS = [
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _img_cache = {}
 
-# Escaneamos tu carpeta real. Esto crea un "diccionario traductor"
-# para que si pides "BONDS.PNG" pero el archivo se llama "bonds.png", lo encuentre igual.
+# Escaneamos la carpeta para ignorar mayúsculas/minúsculas
 try:
     archivos_reales = {f.lower(): f for f in os.listdir(BASE_DIR)}
 except:
     archivos_reales = {}
 
 def get_img(filename):
-    if not filename: 
-        return ""
-        
-    if filename in _img_cache:
-        return _img_cache[filename]
-        
-    # Buscamos el archivo ignorando por completo mayúsculas y minúsculas
-    nombre_lower = filename.lower()
+    if not filename: return ""
+    if filename in _img_cache: return _img_cache[filename]
     
-    # CHIVATO NARANJA: El archivo no está en la carpeta (incluso ignorando mayúsculas)
+    nombre_lower = filename.lower()
+    # CHIVATO NARANJA (No existe)
     if nombre_lower not in archivos_reales:
         return "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><rect width='20' height='20' fill='orange'/></svg>"
         
-    # Ruta exacta con el nombre real que tiene en tu disco duro
     filepath = os.path.join(BASE_DIR, archivos_reales[nombre_lower])
-    
     try:
-        # El bloque 'with' es CRUCIAL. Abre, lee y CIERRA el archivo al instante.
-        # Esto evita que Windows/Mac bloquee el programa al leer +300 archivos a la vez.
+        # Bloque 'with' para cerrar el archivo al instante y no saturar
         with Image.open(filepath) as img:
-            if img.mode != 'RGBA':
-                img = img.convert('RGBA')
-                
+            if img.mode != 'RGBA': img = img.convert('RGBA')
             img.thumbnail((25, 25)) 
             buffered = io.BytesIO()
             img.save(buffered, format="PNG", optimize=True)
-            
         b64_str = "data:image/png;base64," + base64.b64encode(buffered.getvalue()).decode()
         _img_cache[filename] = b64_str
         return b64_str
-        
-    except Exception as e:
-        # CHIVATO NEGRO: El archivo está, pero Windows no nos deja leerlo o está corrupto
+    except:
+        # CHIVATO NEGRO (Corrupto o bloqueado)
         return "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><rect width='20' height='20' fill='black'/></svg>"
 
 # --- 4. FUNCIONES PRINCIPALES ---
@@ -304,7 +292,7 @@ def load_data():
             fsc = max(0, min(10, np.average(scs[::-1], weights=[0.05, 0.1, 0.15, 0.25, 0.45]) if scs else 0))
 
             ip = get_img("BENCH.PNG") if tick == BENCHMARK else get_img(
-                "penguin.png") if tick in MY_PORTFOLIO else get_img("PIRANHA.png") if tick in PIRANHA_ETFS else ""
+                "pinguino.png") if tick in MY_PORTFOLIO else get_img("PIRANHA.png") if tick in PIRANHA_ETFS else ""
 
             rows.append({
                 "Ver": (tick in MY_PORTFOLIO), "Img_S": get_img(isec), "Img_R": get_img(ireg), "Img_P": ip,
@@ -321,7 +309,7 @@ def load_data():
 # --- 5. INTERFAZ ---
 col1, col2 = st.columns([1, 15])
 with col1:
-    # Usamos el mismo buscador insensible a mayúsculas para el pingüino principal
+    # Buscador insensible a mayúsculas para el pingüino de la cabecera
     nombre_ping = "pinguino.png"
     if nombre_ping in archivos_reales:
         st.image(os.path.join(BASE_DIR, archivos_reales[nombre_ping]), width=60)
@@ -369,8 +357,9 @@ if plot_t:
 
     ax.axhline(0, c='gray', lw=1)
     ax.axvline(0, c='gray', lw=1)
-    ax.add_patch(Rectangle((0, 0), 20, 20, color='green', alpha=0.1))
-    ax.add_patch(Rectangle((-20, 0), 20, 20, color='blue', alpha=0.1))
-    ax.add_patch(Rectangle((-20, -20), 20, 20, color='red', alpha=0.1))
-    ax.add_patch(Rectangle((0, -20), 20, 20, color='yellow', alpha=0.1))
+    # Usamos rectángulos gigantes (100x100) para cubrir todo el fondo siempre
+    ax.add_patch(Rectangle((0, 0), 100, 100, color='green', alpha=0.1))     # Leading
+    ax.add_patch(Rectangle((-100, 0), 100, 100, color='blue', alpha=0.1))   # Improving
+    ax.add_patch(Rectangle((-100, -100), 100, 100, color='red', alpha=0.1)) # Lagging
+    ax.add_patch(Rectangle((0, -100), 100, 100, color='yellow', alpha=0.1)) # Weakening
     st.pyplot(fig)
