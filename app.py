@@ -218,17 +218,25 @@ ASSETS = [
     ("WEB 3.0", "WRL", "M37R.DE", "THEMATIC.PNG", "WRL.PNG")
 ]
 
-
-# --- 3. LECTURA DE IMÁGENES ---
+# --- 3. LECTURA DE IMÁGENES (OPTIMIZADA) ---
 @st.cache_resource
 def get_img(path):
     if not os.path.exists(path): return ""
     try:
-        with open(path, "rb") as f:
-            return "data:image/png;base64," + base64.b64encode(f.read()).decode()
+        # Abrimos la imagen con Pillow
+        img = Image.open(path)
+        
+        # Reducimos al vuelo para que no pese casi nada (32x32 píxeles)
+        img.thumbnail((32, 32)) 
+        
+        # Lo guardamos en memoria RAM como PNG
+        buffered = io.BytesIO()
+        img.save(buffered, format="PNG", optimize=True)
+        
+        # Lo pasamos a Base64
+        return "data:image/png;base64," + base64.b64encode(buffered.getvalue()).decode()
     except:
         return ""
-
 
 # --- 4. FUNCIONES PRINCIPALES ---
 def calculate_rrg_zscore(p_ticker, p_bench, offset):
@@ -245,7 +253,6 @@ def calculate_rrg_zscore(p_ticker, p_bench, offset):
         return (lbl, float(sx), float(my))
     except:
         return ("Error", 0.0, 0.0)
-
 
 @st.cache_data(ttl=300)
 def load_data():
@@ -283,7 +290,6 @@ def load_data():
     df = pd.DataFrame(rows).sort_values("Score", ascending=False).reset_index(drop=True)
     df.insert(1, "#", range(1, len(df) + 1))
     return df, hist_dict
-
 
 # --- 5. INTERFAZ ---
 col1, col2 = st.columns([1, 15])
@@ -331,7 +337,7 @@ if plot_t:
         row = edited_df[edited_df['Ticker'] == t].iloc[0]
         ax.text(xs[-1], ys[-1], f" {row['Nombre']}", fontsize=9)
 
-    ax.axhline(0, c='gray', lw=1);
+    ax.axhline(0, c='gray', lw=1)
     ax.axvline(0, c='gray', lw=1)
     ax.add_patch(Rectangle((0, 0), 20, 20, color='green', alpha=0.1))
     ax.add_patch(Rectangle((-20, 0), 20, 20, color='blue', alpha=0.1))
