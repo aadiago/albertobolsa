@@ -218,54 +218,52 @@ ASSETS = [
     ("WEB 3.0", "WRL", "M37R.DE", "THEMATIC.PNG", "WRL.PNG")
 ]
 
-# --- 3. LECTURA DE IMÁGENES (LOCAL ESTRICTO) ---
-
-# Calculamos la ruta absoluta de la carpeta donde está este .py
+# --- 3. LECTURA DE IMÁGENES (A PRUEBA DE BALAS) ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# Diccionario de Python para guardar en memoria las imágenes reducidas
 _img_cache = {}
+
+# Escaneamos tu carpeta real. Esto crea un "diccionario traductor"
+# para que si pides "BONDS.PNG" pero el archivo se llama "bonds.png", lo encuentre igual.
+try:
+    archivos_reales = {f.lower(): f for f in os.listdir(BASE_DIR)}
+except:
+    archivos_reales = {}
 
 def get_img(filename):
     if not filename: 
         return ""
         
-    # Si ya la hemos convertido antes, la sacamos de la memoria al instante
     if filename in _img_cache:
         return _img_cache[filename]
         
-    # Construimos la ruta absoluta e inamovible al archivo
-    filepath = os.path.join(BASE_DIR, filename)
+    # Buscamos el archivo ignorando por completo mayúsculas y minúsculas
+    nombre_lower = filename.lower()
     
-    # CHIVATO: Si no encuentra la imagen, devuelve un cuadrado rojo SVG
-    cuadrado_rojo = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><rect width='20' height='20' fill='red'/></svg>"
-    
-    if not os.path.exists(filepath):
-        return cuadrado_rojo
+    # CHIVATO NARANJA: El archivo no está en la carpeta (incluso ignorando mayúsculas)
+    if nombre_lower not in archivos_reales:
+        return "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><rect width='20' height='20' fill='orange'/></svg>"
         
+    # Ruta exacta con el nombre real que tiene en tu disco duro
+    filepath = os.path.join(BASE_DIR, archivos_reales[nombre_lower])
+    
     try:
-        # Abrimos la imagen
-        img = Image.open(filepath)
-        
-        # Convertimos a formato RGBA por si hay PNGs con transparencias conflictivas
-        if img.mode != 'RGBA':
-            img = img.convert('RGBA')
+        # El bloque 'with' es CRUCIAL. Abre, lee y CIERRA el archivo al instante.
+        # Esto evita que Windows/Mac bloquee el programa al leer +300 archivos a la vez.
+        with Image.open(filepath) as img:
+            if img.mode != 'RGBA':
+                img = img.convert('RGBA')
+                
+            img.thumbnail((25, 25)) 
+            buffered = io.BytesIO()
+            img.save(buffered, format="PNG", optimize=True)
             
-        # Miniaturizamos radicalmente a 25x25 px
-        img.thumbnail((25, 25)) 
-        
-        buffered = io.BytesIO()
-        img.save(buffered, format="PNG", optimize=True)
-        
         b64_str = "data:image/png;base64," + base64.b64encode(buffered.getvalue()).decode()
-        
-        # Guardamos en nuestro caché manual
         _img_cache[filename] = b64_str
         return b64_str
         
     except Exception as e:
-        # Si hay un error leyendo el archivo (corrupto, etc), mostramos el cuadrado rojo
-        return cuadrado_rojo
+        # CHIVATO NEGRO: El archivo está, pero Windows no nos deja leerlo o está corrupto
+        return "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><rect width='20' height='20' fill='black'/></svg>"
 
 # --- 4. FUNCIONES PRINCIPALES ---
 def calculate_rrg_zscore(p_ticker, p_bench, offset):
@@ -323,10 +321,10 @@ def load_data():
 # --- 5. INTERFAZ ---
 col1, col2 = st.columns([1, 15])
 with col1:
-    # Aseguramos que el logo también use la ruta absoluta para no perderse
-    pinguino_path = os.path.join(BASE_DIR, "PINGUINO.PNG")
-    if os.path.exists(pinguino_path): 
-        st.image(pinguino_path, width=60)
+    # Usamos el mismo buscador insensible a mayúsculas para el pingüino principal
+    nombre_ping = "pinguino.png"
+    if nombre_ping in archivos_reales:
+        st.image(os.path.join(BASE_DIR, archivos_reales[nombre_ping]), width=60)
 with col2: st.header("PENGUIN PORTFOLIO")
 
 df, rrg_hist = load_data()
