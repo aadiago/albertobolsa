@@ -81,7 +81,7 @@ WP, WA, WR = st.session_state.w_pos / 100, st.session_state.w_ang / 100, st.sess
 BENCHMARK = "MWEQ.DE"
 # Adaptamos periodos a DIAS (Trend 26w=130d, Mom 4w=20d)
 RRG_TREND_D, RRG_MOM_D, TRADING_DAYS_3M = 130, 20, 63
-MY_PORTFOLIO = ["QDVF.DE", "B41J.DE", "XDWI.DE", "SPYH.DE", "XDWM.DE", "LBRA.DE"]
+MY_PORTFOLIO = ["LCUJ.DE", "B41J.DE", "XDWI.DE", "SW2CHB.SW", "XDWM.DE", "LBRA.DE"]
 PIRANHA_ETFS = ["SXR8.DE", "XDEW.DE", "XDEE.DE", "IBCF.DE"]
 
 ASSETS = [
@@ -433,4 +433,5 @@ if not raw_prices.empty:
         ax.add_patch(Rectangle((-limit, 0), limit, limit, color='blue', alpha=0.04))
         ax.add_patch(Rectangle((-limit, -limit), limit, limit, color='red', alpha=0.04))
         ax.add_patch(Rectangle((0, -limit), limit, limit, color='yellow', alpha=0.04))
+
         st.pyplot(fig)
