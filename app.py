@@ -11,32 +11,79 @@ from PIL import Image
 import io
 
 # --- 1. CONFIGURACIÓN ---
-st.set_page_config(layout="wide", page_title="PENGUIN PORTFOLIO", page_icon="🐧")
+st.set_page_config(layout="wide", page_title="PENGUIN PORTFOLIO PRO", page_icon="🐧")
 
-# CSS: Forzamos al navegador a renderizar las imágenes de las celdas
 st.markdown("""
     <style>
-    div[data-testid="stDataFrame"] div[role="columnheader"] { justify-content: center !important; text-align: center !important; }
-    div[data-testid="stDataFrame"] div[role="gridcell"] { justify-content: center !important; text-align: center !important; display: flex !important; }
+    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:italic,wght@400;700&display=swap');
+    .alberto-sofia {
+        font-family: 'Playfair Display', serif;
+        font-style: italic;
+        font-size: 1.6rem;
+        color: #4A4A4A;
+        margin-top: -20px;
+        margin-bottom: 25px;
+    }
+    /* Estética de Sliders */
+    div[data-testid="stTickBar"] { display: none; }
+    div[data-testid="stSlider"] label { font-weight: bold; font-size: 0.9rem; }
+
     div[data-testid="stDataFrame"] td img { 
         display: block !important; 
         max-height: 25px !important; 
         width: auto !important;
-        image-rendering: -webkit-optimize-contrast !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. CONSTANTES ---
-BENCHMARK = "MWEQ.DE"
-RRG_PERIOD_TREND = 26
-RRG_PERIOD_MOM = 4
-OFFSET_1W, OFFSET_2W, OFFSET_3W, OFFSET_4W = -1, -2, -3, -4
+# --- 2. LÓGICA DE CONTROLES ---
+if 'w_pos' not in st.session_state: st.session_state.w_pos = 60.0
+if 'w_ang' not in st.session_state: st.session_state.w_ang = 30.0
+if 'w_r2' not in st.session_state: st.session_state.w_r2 = 10.0
 
-MY_PORTFOLIO = ["QDVF.DE", "JREM.DE", "XDWI.DE", "SPYH.DE", "XDWM.DE", "LBRA.DE"]
+
+def sync_pos():
+    val = st.session_state.sl_pos
+    rem = 100.0 - val
+    st.session_state.w_pos, st.session_state.w_ang, st.session_state.w_r2 = val, rem / 2, rem / 2
+
+
+def sync_ang():
+    val = st.session_state.sl_ang
+    rem = 100.0 - val
+    st.session_state.w_ang, st.session_state.w_pos, st.session_state.w_r2 = val, rem / 2, rem / 2
+
+
+def sync_r2():
+    val = st.session_state.sl_r2
+    rem = 100.0 - val
+    st.session_state.w_r2, st.session_state.w_pos, st.session_state.w_ang = val, rem / 2, rem / 2
+
+
+# --- 3. CABECERA ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+col_h1, col_h2 = st.columns([1, 15])
+with col_h1:
+    img_p = os.path.join(BASE_DIR, "pinguino.png")
+    if os.path.exists(img_p): st.image(img_p, width=65)
+with col_h2: st.header("PENGUIN PORTFOLIO")
+st.markdown('<p class="alberto-sofia">Sofía y Alberto 2026</p>', unsafe_allow_html=True)
+
+# --- 4. CONTROLES SUPERIORES ---
+c1, c2, c3 = st.columns(3)
+with c1: st.slider("POS %", 0.0, 100.0, float(st.session_state.w_pos), key="sl_pos", on_change=sync_pos)
+with c2: st.slider("ANG %", 0.0, 100.0, float(st.session_state.w_ang), key="sl_ang", on_change=sync_ang)
+with c3: st.slider("R² %", 0.0, 100.0, float(st.session_state.w_r2), key="sl_r2", on_change=sync_r2)
+
+WP, WA, WR = st.session_state.w_pos / 100, st.session_state.w_ang / 100, st.session_state.w_r2 / 100
+
+# --- 5. CONSTANTES Y ASSETS ---
+BENCHMARK = "MWEQ.DE"
+# Adaptamos periodos a DIAS (Trend 26w=130d, Mom 4w=20d)
+RRG_TREND_D, RRG_MOM_D, TRADING_DAYS_3M = 130, 20, 63
+MY_PORTFOLIO = ["QDVF.DE", "B41J.DE", "XDWI.DE", "SPYH.DE", "XDWM.DE", "LBRA.DE"]
 PIRANHA_ETFS = ["SXR8.DE", "XDEW.DE", "XDEE.DE", "IBCF.DE"]
 
-# --- LISTA DE ACTIVOS ---
 ASSETS = [
     ("AGGREGATE HDG", "EME", "XEMB.DE", "BONDS.PNG", "EME.PNG"),
     ("AGGREGATE HDG", "WRL", "DBZB.DE", "BONDS.PNG", "WRL.PNG"),
@@ -101,7 +148,7 @@ ASSETS = [
     ("MSCI INDIA", "EME", "QDV5.DE", "INDICEP.PNG", "EME.PNG"),
     ("MSCI INDONESIA", "EME", "H4Z7.DE", "INDICEP.PNG", "EME.PNG"),
     ("MSCI JAPAN HDG", "JPN", "IBCG.DE", "INDICEP.PNG", "JAPAN.PNG"),
-    ("MSCI JAPAN JPN", "JPN", "LCUJ.DE", "INDICEP.PNG", "JAPAN.PNG"),
+    ("MSCI JAPAN", "JPN", "LCUJ.DE", "INDICEP.PNG", "JAPAN.PNG"),
     ("MSCI MALAYSIA", "EME", "XCS3.DE", "INDICEP.PNG", "EME.PNG"),
     ("MSCI MEXICO", "EME", "D5BI.DE", "INDICEP.PNG", "EME.PNG"),
     ("MSCI PHILIPPINES", "EME", "XPQP.DE", "INDICEP.PNG", "EME.PNG"),
@@ -218,162 +265,172 @@ ASSETS = [
     ("WEB 3.0", "WRL", "M37R.DE", "THEMATIC.PNG", "WRL.PNG")
 ]
 
-# --- 3. LECTURA DE IMÁGENES (A PRUEBA DE BALAS) ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# --- 6. SERVICIOS ---
 _img_cache = {}
 
-try:
-    archivos_reales = {f.lower(): f for f in os.listdir(BASE_DIR)}
-except:
-    archivos_reales = {}
 
-def get_img(filename):
+def get_img_b64(filename):
     if not filename: return ""
     if filename in _img_cache: return _img_cache[filename]
-    
-    nombre_lower = filename.lower()
-    if nombre_lower not in archivos_reales:
-        return "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><rect width='20' height='20' fill='orange'/></svg>"
-        
-    filepath = os.path.join(BASE_DIR, archivos_reales[nombre_lower])
+    path = os.path.join(BASE_DIR, filename)
+    if not os.path.exists(path): return ""
     try:
-        with Image.open(filepath) as img:
-            if img.mode != 'RGBA': img = img.convert('RGBA')
-            img.thumbnail((25, 25)) 
-            buffered = io.BytesIO()
-            img.save(buffered, format="PNG", optimize=True)
-        b64_str = "data:image/png;base64," + base64.b64encode(buffered.getvalue()).decode()
-        _img_cache[filename] = b64_str
-        return b64_str
+        with Image.open(path) as img:
+            img.thumbnail((25, 25))
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+        b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+        _img_cache[filename] = b64
+        return b64
     except:
-        return "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><rect width='20' height='20' fill='black'/></svg>"
+        return ""
 
-# --- 4. FUNCIONES PRINCIPALES ---
-def calculate_rrg_zscore(p_ticker, p_bench, offset):
-    try:
-        df = pd.DataFrame({'t': p_ticker, 'b': p_bench}).dropna()
-        if len(df) < 32: return ("Error", 0.0, 0.0)
-        rs = (df['t'] / df['b']) * 100
-        rs_cut = rs if offset == 0 else rs.iloc[:offset]
-        m_l, s_l = rs_cut.rolling(RRG_PERIOD_TREND).mean().iloc[-1], rs_cut.rolling(RRG_PERIOD_TREND).std().iloc[-1]
-        m_s, s_s = rs_cut.rolling(RRG_PERIOD_MOM).mean().iloc[-1], rs_cut.rolling(RRG_PERIOD_MOM).std().iloc[-1]
-        sx = ((rs_cut.iloc[-1] - m_l) / (s_l if s_l else 1)) * 10
-        my = ((rs_cut.iloc[-1] - m_s) / (s_s if s_s else 1)) * 10
-        lbl = "Leading" if sx >= 0 and my >= 0 else "Weakening" if sx >= 0 and my < 0 else "Lagging" if sx < 0 and my < 0 else "Improving"
-        return (lbl, float(sx), float(my))
-    except:
-        return ("Error", 0.0, 0.0)
+
+def get_rrg_pts(ticker_df, bench_df):
+    rs = (ticker_df / bench_df) * 100
+    rs_sm = rs.ewm(span=20, adjust=False).mean()
+    m_l, s_l = rs_sm.rolling(130).mean(), rs_sm.rolling(130).std()
+    rs_ratio = ((rs_sm - m_l) / s_l.replace(0, 1)) * 10 + 100
+    rs_mom_raw = rs_sm.pct_change(periods=20) * 100
+    m_s, s_s = rs_mom_raw.rolling(20).mean(), rs_mom_raw.rolling(20).std()
+    rs_mom = ((rs_mom_raw - m_s) / s_s.replace(0, 1)) * 10 + 100
+    return rs_ratio, rs_mom
+
 
 @st.cache_data(ttl=300)
-def load_data():
+def load_data(tickers):
     try:
-        bench = yf.Ticker(BENCHMARK).history(period="2y")['Close'].resample('W-FRI').last().dropna().tz_localize(None)
+        return yf.download(tickers, period="2y", auto_adjust=True, progress=False)['Close']
     except:
-        return pd.DataFrame(), {}
+        return pd.DataFrame()
 
-    rows, hist_dict = [], {}
-    bar = st.progress(0, "Actualizando precios...")
-    for i, (nom, reg, tick, isec, ireg) in enumerate(ASSETS):
-        bar.progress((i + 1) / len(ASSETS))
-        try:
-            h = yf.Ticker(tick).history(period="2y")['Close']
-            if h.empty: continue
-            d_pct = ((h.iloc[-1] / h.iloc[-2]) - 1) * 100
-            ws = h.resample('W-FRI').last().dropna().tz_localize(None)
-            m3 = ((ws.iloc[-1] / ws.iloc[-14]) - 1) * 100 if len(ws) >= 14 else 0.0
-            rrg = [calculate_rrg_zscore(ws, bench, o) for o in [0, OFFSET_1W, OFFSET_2W, OFFSET_3W, OFFSET_4W]]
-            hist_dict[tick] = rrg
-            scs = [5.0 + (d[1] * 0.12 + d[2] * 0.04) for d in rrg if d[0] != "Error"]
-            fsc = max(0, min(10, np.average(scs[::-1], weights=[0.05, 0.1, 0.15, 0.25, 0.45]) if scs else 0))
 
-            ip = get_img("BENCH.PNG") if tick == BENCHMARK else get_img(
-                "pinguino.png") if tick in MY_PORTFOLIO else get_img("PIRANHA.png") if tick in PIRANHA_ETFS else ""
+# --- 7. FLUJO PRINCIPAL ---
+t_list = list(set([a[2] for a in ASSETS] + [BENCHMARK]))
+with st.status("CARGANDO DATOS...", expanded=False) as status:
+    raw_prices = load_data(t_list)
+    status.update(label="DATOS PROCESADOS", state="complete")
 
-            rows.append({
-                "Ver": (tick in MY_PORTFOLIO), "Img_S": get_img(isec), "Img_R": get_img(ireg), "Img_P": ip,
-                "Ticker": tick, "Nombre": nom, "Reg": reg, "Score": round(fsc, 1),
-                "% Hoy": round(d_pct, 2), "% 3M": round(m3, 2), "POS": rrg[0][0], "STR": rrg[0][1], "MOM": rrg[0][2]
-            })
-        except:
-            continue
-    bar.empty()
-    df = pd.DataFrame(rows).sort_values("Score", ascending=False).reset_index(drop=True)
+if not raw_prices.empty:
+    bench_p = raw_prices[BENCHMARK]
+    res_raw, rrg_hist = [], {}
+
+    for name, reg, tick, isec, ireg in ASSETS:
+        if tick not in raw_prices.columns: continue
+        r_ser, m_ser = get_rrg_pts(raw_prices[tick], bench_p)
+        if r_ser.isna().all() or len(r_ser) < 30: continue
+
+        # PUNTOS DINÁMICOS: 0, -5, -10, -15, -20 días (Trayectoria Dinámica)
+        pts = []
+        for d in [0, 5, 10, 15, 20]:
+            idx = -(d + 1)
+            pts.append((float(r_ser.iloc[idx]), float(m_ser.iloc[idx])))
+
+        # Inteligencia (POS RELATIVA + ANG + R2)
+        d_curr = np.sqrt((140 - pts[0][0]) ** 2 + (140 - pts[0][1]) ** 2)
+        t_ax = np.array([1, 2, 3, 4, 5])
+        xv, yv = np.array([p[0] for p in pts][::-1]), np.array([p[1] for p in pts][::-1])
+        sx, _ = np.polyfit(t_ax, xv, 1);
+        sy, _ = np.polyfit(t_ax, yv, 1)
+        angle = np.degrees(np.arctan2(sy, sx))
+        diff = angle - 45
+        if diff > 180: diff -= 360
+        if diff < -180: diff += 360
+        ang_val = np.clip(10 - (abs(diff) / 18), 0, 10)
+
+
+        def get_r2(t, v, s):
+            res = np.sum((v - (s * t + (np.mean(v) - s * np.mean(t)))) ** 2)
+            tot = np.sum((v - np.mean(v)) ** 2)
+            return 1 - (res / tot) if tot > 1e-6 else 0
+
+
+        r2_sc = np.clip(((get_r2(t_ax, xv, sx) + get_r2(t_ax, yv, sy)) / 2) * 10, 0, 10)
+
+        ret1d = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-2]) - 1) * 100
+        ret3m = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-63]) - 1) * 100 if len(
+            raw_prices[tick]) >= 63 else 0
+
+        res_raw.append({
+            "tick": tick, "name": name, "reg": reg, "isec": isec, "ireg": ireg,
+            "d_curr": d_curr, "ang": ang_val, "r2": r2_sc, "str": pts[0][0] - 100, "mom": pts[0][1] - 100,
+            "r1d": ret1d, "r3m": ret3m
+        })
+        rrg_hist[tick] = pts
+
+    # Normalización Relativa de Posición
+    dists = [r['d_curr'] for r in res_raw]
+    min_d, max_d = min(dists), max(dists)
+
+    final_rows = []
+    for r in res_raw:
+        pos_sc = ((max_d - r['d_curr']) / (max_d - min_d)) * 10 if max_d != min_d else 5.0
+        score = (pos_sc * WP) + (r['ang'] * WA) + (r['r2'] * WR)
+        final_rows.append({
+            "Ver": (r['tick'] in MY_PORTFOLIO), "Img_S": get_img_b64(r['isec']), "Img_R": get_img_b64(r['ireg']),
+            "Img_P": get_img_b64("pinguino.png") if r['tick'] in MY_PORTFOLIO else get_img_b64("PIRANHA.png") if r[
+                                                                                                                     'tick'] in PIRANHA_ETFS else "",
+            "Ticker": r['tick'], "Nombre": r['name'], "Score": round(score, 2),
+            "P-Pos": round(pos_sc, 2), "P-Ang": round(r['ang'], 2), "P-R2": round(r['r2'], 2),
+            "STR": round(r['str'], 2), "MOM": round(r['mom'], 2),
+            "% Hoy": round(r['r1d'], 2), "% 3M": round(r['r3m'], 2),
+            "POS": "Leading" if r['str'] >= 0 and r['mom'] >= 0 else "Weakening" if r['str'] >= 0 and r[
+                'mom'] < 0 else "Lagging" if r['str'] < 0 and r['mom'] < 0 else "Improving"
+        })
+
+    df = pd.DataFrame(final_rows).sort_values("Score", ascending=False).reset_index(drop=True)
     df.insert(1, "#", range(1, len(df) + 1))
-    return df, hist_dict
 
-# --- 5. INTERFAZ ---
-col1, col2 = st.columns([1, 15])
-with col1:
-    nombre_ping = "pinguino.png"
-    if nombre_ping in archivos_reales:
-        st.image(os.path.join(BASE_DIR, archivos_reales[nombre_ping]), width=60)
-with col2: st.header("PENGUIN PORTFOLIO")
+    # --- 8. VISTA ---
+    conf = {
+        "Ver": st.column_config.CheckboxColumn("Ver"), "Img_S": st.column_config.ImageColumn("Sec"),
+        "Img_R": st.column_config.ImageColumn("Reg"), "Img_P": st.column_config.ImageColumn("👤"),
+        "Score": st.column_config.NumberColumn("Nota"),
+        "% Hoy": st.column_config.NumberColumn("% Hoy", format="%.2f%%"),
+        "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%"),
+    }
+    v_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "Ticker", "Nombre", "Score", "P-Pos", "P-Ang", "P-R2", "STR",
+              "MOM", "% Hoy", "% 3M", "POS"]
+    edit_df = st.data_editor(df, hide_index=True, column_order=v_cols, column_config=conf,
+                             disabled=[c for c in v_cols if c != "Ver"], height=550)
 
-df, rrg_hist = load_data()
-st.caption("Sofía & Alberto 2026")
+    # --- 9. GRÁFICA ELITE ---
+    plot_t = edit_df[edit_df["Ver"] == True]["Ticker"].tolist()
+    st.divider()
+    if plot_t:
+        fig, ax = plt.subplots(figsize=(10, 8))
+        all_x, all_y = [], []
+        for t in plot_t:
+            pts_raw = rrg_hist.get(t, [])
+            xs = np.array([p[0] - 100 for p in pts_raw][::-1])
+            ys = np.array([p[1] - 100 for p in pts_raw][::-1])
+            all_x.extend(xs);
+            all_y.extend(ys)
 
-conf = {
-    "Ver": st.column_config.CheckboxColumn("Ver"),
-    "Img_S": st.column_config.ImageColumn("Sec"),
-    "Img_R": st.column_config.ImageColumn("Reg"),
-    "Img_P": st.column_config.ImageColumn("👤"),
-    "Score": st.column_config.NumberColumn("Nota"),
-    "% Hoy": st.column_config.NumberColumn("% Hoy", format="%.2f%%"),
-    "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%"),
-}
+            # Línea elegante suavizada
+            if len(xs) >= 3:
+                tr = np.arange(len(xs));
+                td = np.linspace(0, len(xs) - 1, 100)
+                xs_s = make_interp_spline(tr, xs, k=2)(td)
+                ys_s = make_interp_spline(tr, ys, k=2)(td)
+                ax.plot(xs_s, ys_s, lw=1.2, alpha=0.7)
 
-v_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "Ticker", "Nombre", "Score", "% Hoy", "% 3M", "POS"]
+            # Puntos históricos (migas de pan)
+            ax.scatter(xs[:-1], ys[:-1], s=25, alpha=0.4, edgecolors='none')
+            # Punto ACTUAL (Gordo)
+            ax.scatter(xs[-1], ys[-1], s=160, alpha=1.0, edgecolors='white', linewidth=1.5, zorder=5)
+            ax.text(xs[-1], ys[-1], f"  {t}", fontsize=9, fontweight='bold', va='center')
 
-edited_df = st.data_editor(df, use_container_width=False, hide_index=True, column_order=v_cols, column_config=conf,
-                           disabled=[c for c in v_cols if c != "Ver"], height=500)
-
-# --- GRÁFICA ---
-plot_t = edited_df[edited_df["Ver"] == True]["Ticker"].tolist()
-st.divider()
-st.subheader(f"📈 Gráfico RRG")
-
-if plot_t:
-    fig, ax = plt.subplots(figsize=(10, 8))
-    for i, t in enumerate(plot_t):
-        raw = rrg_hist.get(t, [])
-        pts = [(r[1], r[2]) for r in raw if r[0] != "Error"][::-1]
-        if len(pts) < 2: continue
-        xs, ys = np.array([p[0] for p in pts]), np.array([p[1] for p in pts])
-        if len(xs) >= 3:
-            tr = np.arange(len(xs))
-            td = np.linspace(0, len(xs) - 1, 100)
-            xs = make_interp_spline(tr, xs, k=2)(td)
-            ys = make_interp_spline(tr, ys, k=2)(td)
-        ax.plot(xs, ys, lw=2, alpha=0.8)
-        ax.scatter(xs[-1], ys[-1], s=120)
-        row = edited_df[edited_df['Ticker'] == t].iloc[0]
-        ax.text(xs[-1], ys[-1], f" {row['Nombre']}", fontsize=9)
-
-    ax.axhline(0, c='gray', lw=1)
-    ax.axvline(0, c='gray', lw=1)
-
-    # 1. PREGUNTAMOS A MATPLOTLIB LOS BORDES DEL GRÁFICO (AUTO-ESCALADOS)
-    xmin, xmax = ax.get_xlim()
-    ymin, ymax = ax.get_ylim()
-
-    # 2. NOS ASEGURAMOS DE QUE LOS BORDES INCLUYAN EL (0,0) PARA DIBUJAR BIEN LOS CUADRANTES
-    xmin = min(xmin, 0)
-    xmax = max(xmax, 0)
-    ymin = min(ymin, 0)
-    ymax = max(ymax, 0)
-
-    # 3. DIBUJAMOS LOS COLORES EXACTAMENTE HASTA LOS BORDES DE LA PANTALLA
-    # Cuadrante Superior Derecho (Verde)
-    ax.add_patch(Rectangle((0, 0), xmax, ymax, color='green', alpha=0.1))
-    # Cuadrante Superior Izquierdo (Azul)
-    ax.add_patch(Rectangle((xmin, 0), abs(xmin), ymax, color='blue', alpha=0.1))
-    # Cuadrante Inferior Izquierdo (Rojo)
-    ax.add_patch(Rectangle((xmin, ymin), abs(xmin), abs(ymin), color='red', alpha=0.1))
-    # Cuadrante Inferior Derecho (Amarillo)
-    ax.add_patch(Rectangle((0, ymin), xmax, abs(ymin), color='yellow', alpha=0.1))
-
-    # 4. LE DECIMOS A MATPLOTLIB QUE NO SE ALEJE MÁS DE LOS BORDES ORIGINALES
-    ax.set_xlim(xmin, xmax)
-    ax.set_ylim(ymin, ymax)
-
-    st.pyplot(fig)
+        ax.axhline(0, c='#CCCCCC', lw=1, zorder=1);
+        ax.axvline(0, c='#CCCCCC', lw=1, zorder=1)
+        if all_x:
+            limit = max(max(abs(min(all_x)), abs(max(all_x))), max(abs(min(all_y)), abs(max(all_y))), 1.5) * 1.3
+        else:
+            limit = 15
+        ax.set_xlim(-limit, limit);
+        ax.set_ylim(-limit, limit)
+        ax.add_patch(Rectangle((0, 0), limit, limit, color='green', alpha=0.04))
+        ax.add_patch(Rectangle((-limit, 0), limit, limit, color='blue', alpha=0.04))
+        ax.add_patch(Rectangle((-limit, -limit), limit, limit, color='red', alpha=0.04))
+        ax.add_patch(Rectangle((0, -limit), limit, limit, color='yellow', alpha=0.04))
+        st.pyplot(fig)
