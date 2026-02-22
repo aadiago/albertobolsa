@@ -24,12 +24,6 @@ st.markdown("""
         margin-top: -20px;
         margin-bottom: 25px;
     }
-    /* Forzar que las imágenes se vean sí o sí */
-    div[data-testid="stDataFrame"] td img { 
-        display: block !important; 
-        max-height: 25px !important; 
-        width: auto !important;
-    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -52,7 +46,6 @@ def sync_r2():
     st.session_state.w_r2, st.session_state.w_pos, st.session_state.w_ang = val, rem / 2, rem / 2
 
 # --- 3. CABECERA ---
-# Usamos os.getcwd() para asegurar que buscamos en la carpeta activa
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 col_h1, col_h2 = st.columns([1, 15])
@@ -70,7 +63,7 @@ with c3: st.slider("R² %", 0.0, 100.0, float(st.session_state.w_r2), key="sl_r2
 
 WP, WA, WR = st.session_state.w_pos / 100, st.session_state.w_ang / 100, st.session_state.w_r2 / 100
 
-# --- 5. CONSTANTES Y ASSETS (MANTENER TU LISTA COMPLETA DE 178) ---
+# --- 5. CONSTANTES Y ASSETS ---
 BENCHMARK = "MWEQ.DE"
 MY_PORTFOLIO = ["LCUJ.DE", "B41J.DE", "XDWI.DE", "SW2CHB.SW", "XDWM.DE", "LBRA.DE"]
 PIRANHA_ETFS = ["SXR8.DE", "XDEW.DE", "XDEE.DE", "IBCF.DE"]
@@ -260,17 +253,25 @@ ASSETS = [
 _img_cache = {}
 
 def get_img_b64(filename):
-    if not filename: return ""
+    if not filename: return None
     if filename in _img_cache: return _img_cache[filename]
     
-    # Intenta ruta relativa y absoluta
-    path = os.path.join(BASE_DIR, filename)
+    # Búsqueda insensible a mayúsculas/minúsculas para evitar problemas al subir a la nube
+    actual_filename = filename
+    try:
+        for f in os.listdir(BASE_DIR):
+            if f.lower() == filename.lower():
+                actual_filename = f
+                break
+    except Exception:
+        pass
+        
+    path = os.path.join(BASE_DIR, actual_filename)
     if not os.path.exists(path):
-        return ""
+        return None  # Devolvemos None en lugar de "" para que Streamlit no se rompa
         
     try:
         with Image.open(path) as img:
-            # Forzar RGBA y redimensionado limpio
             img = img.convert("RGBA")
             img.thumbnail((32, 32), Image.Resampling.LANCZOS)
             buf = io.BytesIO()
@@ -279,7 +280,7 @@ def get_img_b64(filename):
             _img_cache[filename] = b64
             return b64
     except:
-        return ""
+        return None
 
 def get_rrg_pts(ticker_df, bench_df):
     rs = (ticker_df / bench_df) * 100
@@ -293,7 +294,6 @@ def get_rrg_pts(ticker_df, bench_df):
 
 @st.cache_data(ttl=600)
 def load_data_robust(tickers):
-    # Yahoo a veces falla con muchos tickers. Dividimos en 4 lotes.
     all_data = []
     chunk_size = 45
     for i in range(0, len(tickers), chunk_size):
@@ -356,7 +356,8 @@ if not raw_prices.empty:
         pos_sc = ((max_d - r['d_curr']) / (max_d - min_d)) * 10 if max_d != min_d else 5.0
         score = (pos_sc * WP) + (r['ang'] * WA) + (r['r2'] * WR)
         
-        p_ic = "pinguino.png" if r['tick'] in MY_PORTFOLIO else "PIRANHA.png" if r['tick'] in PIRANHA_ETFS else ""
+        # Pasamos None si no se cumple ninguna condición para no enviar cadenas vacías
+        p_ic = "pinguino.png" if r['tick'] in MY_PORTFOLIO else "PIRANHA.png" if r['tick'] in PIRANHA_ETFS else None
 
         final_rows.append({
             "Ver": (r['tick'] in MY_PORTFOLIO), 
