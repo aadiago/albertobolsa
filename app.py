@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import numpy as np
-import matplotlib.pyplot as plt
+import matplotlib.subplots as plt
 from matplotlib.patches import Rectangle
 from scipy.interpolate import make_interp_spline
 import base64
@@ -23,19 +23,19 @@ st.markdown("""
         padding-bottom: 1rem !important;
     }
     .main-title {
-        font-size: 1.4rem; /* Reducido de 1.8 a 1.4 */
+        font-size: 1.4rem;
         font-weight: bold;
-        margin-bottom: 0px; /* Quitamos el margen negativo para evitar solapamiento */
+        margin-bottom: 0px;
         padding-top: 0px;
         color: #1E1E1E;
-        line-height: 1.1; /* Controla la altura de la línea para juntarlo limpio */
+        line-height: 1.1;
     }
     .alberto-sofia {
         font-family: 'Playfair Display', serif;
         font-style: italic;
-        font-size: 0.9rem; /* Reducido de 1.1 a 0.9 */
+        font-size: 0.9rem;
         color: #4A4A4A;
-        margin-top: 2px; /* Un pelín de separación natural */
+        margin-top: 2px;
         margin-bottom: 5px;
         line-height: 1.1;
     }
@@ -45,10 +45,10 @@ st.markdown("""
 # --- 2. CABECERA COMPACTA ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-col_h1, col_h2 = st.columns([1, 25]) # Ajustamos el ratio de la columna para el icono más pequeño
+col_h1, col_h2 = st.columns([1, 25])
 with col_h1:
     p_path = os.path.join(BASE_DIR, "pinguino.png")
-    if os.path.exists(p_path): st.image(p_path, width=32) # Icono reducido de 45 a 32
+    if os.path.exists(p_path): st.image(p_path, width=32)
 with col_h2: 
     st.markdown('<p class="main-title">PENGUIN PORTFOLIO</p>', unsafe_allow_html=True)
     st.markdown('<p class="alberto-sofia">Sofía y Alberto 2026</p>', unsafe_allow_html=True)
@@ -144,7 +144,7 @@ ASSETS = [
     ("MSCI TURQUÍA", "EUR", "LTUR.DE", "INDICEP.PNG", "EUR.PNG"),
     ("NASDAQ 100", "USA", "SXRV.DE", "INDICEP.PNG", "USA.PNG"),
     ("NASDAQ 100 HDG", "USA", "NQSE.DE", "INDICEP.PNG", "USA.PNG"),
-    ("NIKKEI 225", "WRL", "XDJP.DE", "INDICEP.PNG", "WRL.PNG"),
+    ("NIKKEI 225", "JPN", "XDJP.DE", "INDICEP.PNG", "JAPAN.PNG"),
     ("RUSSELL 2000", "USA", "ZPRR.DE", "INDICEP.PNG", "USA.PNG"),
     ("S&P 500", "USA", "SXR8.DE", "INDICEP.PNG", "USA.PNG"),
     ("S&P 500 EW", "USA", "XDEW.DE", "INDICEP.PNG", "USA.PNG"),
@@ -272,7 +272,18 @@ def get_img_b64(filename):
     try:
         with Image.open(path) as img:
             img = img.convert("RGBA")
-            img.thumbnail((32, 32), Image.Resampling.LANCZOS)
+            
+            # Condición especial para EME.PNG: hacerla más pequeña visualmente
+            if filename.lower() == "eme.png":
+                img.thumbnail((24, 24), Image.Resampling.LANCZOS)
+                # Pegarla sobre un fondo transparente de 32x32 para que no se estire
+                bg = Image.new("RGBA", (32, 32), (255, 255, 255, 0))
+                offset = ((32 - img.width) // 2, (32 - img.height) // 2)
+                bg.paste(img, offset)
+                img = bg
+            else:
+                img.thumbnail((32, 32), Image.Resampling.LANCZOS)
+                
             buf = io.BytesIO()
             img.save(buf, format="PNG")
             b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
