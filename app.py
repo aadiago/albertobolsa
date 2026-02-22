@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import numpy as np
-import matplotlib.subplots as plt
+import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from scipy.interpolate import make_interp_spline
 import base64
