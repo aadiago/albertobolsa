@@ -16,26 +16,42 @@ st.set_page_config(layout="wide", page_title="PENGUIN PORTFOLIO PRO", page_icon=
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:italic,wght@400;700&display=swap');
+    
+    /* Reducción drástica del espacio de la cabecera */
+    .block-container {
+        padding-top: 1rem !important;
+        padding-bottom: 1rem !important;
+    }
+    .main-title {
+        font-size: 1.4rem; /* Reducido de 1.8 a 1.4 */
+        font-weight: bold;
+        margin-bottom: 0px; /* Quitamos el margen negativo para evitar solapamiento */
+        padding-top: 0px;
+        color: #1E1E1E;
+        line-height: 1.1; /* Controla la altura de la línea para juntarlo limpio */
+    }
     .alberto-sofia {
         font-family: 'Playfair Display', serif;
         font-style: italic;
-        font-size: 1.6rem;
+        font-size: 0.9rem; /* Reducido de 1.1 a 0.9 */
         color: #4A4A4A;
-        margin-top: -20px;
-        margin-bottom: 25px;
+        margin-top: 2px; /* Un pelín de separación natural */
+        margin-bottom: 5px;
+        line-height: 1.1;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. CABECERA ---
+# --- 2. CABECERA COMPACTA ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-col_h1, col_h2 = st.columns([1, 15])
+col_h1, col_h2 = st.columns([1, 25]) # Ajustamos el ratio de la columna para el icono más pequeño
 with col_h1:
     p_path = os.path.join(BASE_DIR, "pinguino.png")
-    if os.path.exists(p_path): st.image(p_path, width=65)
-with col_h2: st.header("PENGUIN PORTFOLIO")
-st.markdown('<p class="alberto-sofia">Sofía y Alberto 2026</p>', unsafe_allow_html=True)
+    if os.path.exists(p_path): st.image(p_path, width=32) # Icono reducido de 45 a 32
+with col_h2: 
+    st.markdown('<p class="main-title">PENGUIN PORTFOLIO</p>', unsafe_allow_html=True)
+    st.markdown('<p class="alberto-sofia">Sofía y Alberto 2026</p>', unsafe_allow_html=True)
 
 # --- 3. PARÁMETROS FIJOS ---
 WEIGHT_POS = 60.0
@@ -268,7 +284,6 @@ def get_img_b64(filename):
 def get_rrg_pts(ticker_df, bench_df):
     rs = (ticker_df / bench_df) * 100
     rs_sm = rs.ewm(span=20, adjust=False).mean()
-    # Modificado a 100 periodos
     m_l, s_l = rs_sm.rolling(100).mean(), rs_sm.rolling(100).std()
     rs_ratio = ((rs_sm - m_l) / s_l.replace(0, 1)) * 10 + 100
     rs_mom_raw = rs_sm.pct_change(periods=20) * 100
