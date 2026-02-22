@@ -24,18 +24,15 @@ st.markdown("""
         margin-top: -20px;
         margin-bottom: 25px;
     }
-    /* Optimización de visualización de imágenes en tablas */
     div[data-testid="stDataFrame"] td img { 
         display: block !important; 
-        max-height: 30px !important; 
+        max-height: 25px !important; 
         width: auto !important;
-        margin-left: auto;
-        margin-right: auto;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. LÓGICA DE ESTADO (SESSIÓN) ---
+# --- 2. LÓGICA DE CONTROLES ---
 if 'w_pos' not in st.session_state: st.session_state.w_pos = 60.0
 if 'w_ang' not in st.session_state: st.session_state.w_ang = 30.0
 if 'w_r2' not in st.session_state: st.session_state.w_r2 = 10.0
@@ -60,14 +57,12 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 col_h1, col_h2 = st.columns([1, 15])
 with col_h1:
-    img_p_path = os.path.join(BASE_DIR, "pinguino.png")
-    if os.path.exists(img_p_path): 
-        st.image(img_p_path, width=65)
-with col_h2: 
-    st.header("PENGUIN PORTFOLIO")
+    img_p = os.path.join(BASE_DIR, "pinguino.png")
+    if os.path.exists(img_p): st.image(img_p, width=65)
+with col_h2: st.header("PENGUIN PORTFOLIO")
 st.markdown('<p class="alberto-sofia">Sofía y Alberto 2026</p>', unsafe_allow_html=True)
 
-# --- 4. CONTROLES ---
+# --- 4. CONTROLES SUPERIORES ---
 c1, c2, c3 = st.columns(3)
 with c1: st.slider("POS %", 0.0, 100.0, float(st.session_state.w_pos), key="sl_pos", on_change=sync_pos)
 with c2: st.slider("ANG %", 0.0, 100.0, float(st.session_state.w_ang), key="sl_ang", on_change=sync_ang)
@@ -75,12 +70,11 @@ with c3: st.slider("R² %", 0.0, 100.0, float(st.session_state.w_r2), key="sl_r2
 
 WP, WA, WR = st.session_state.w_pos / 100, st.session_state.w_ang / 100, st.session_state.w_r2 / 100
 
-# --- 5. ASSETS Y CONSTANTES ---
+# --- 5. CONSTANTES Y ASSETS ---
 BENCHMARK = "MWEQ.DE"
 MY_PORTFOLIO = ["LCUJ.DE", "B41J.DE", "XDWI.DE", "SW2CHB.SW", "XDWM.DE", "LBRA.DE"]
 PIRANHA_ETFS = ["SXR8.DE", "XDEW.DE", "XDEE.DE", "IBCF.DE"]
 
-# Lista de activos corregida
 ASSETS = [
     ("AGGREGATE HDG", "EME", "XEMB.DE", "BONDS.PNG", "EME.PNG"),
     ("AGGREGATE HDG", "WRL", "DBZB.DE", "BONDS.PNG", "WRL.PNG"),
@@ -216,37 +210,33 @@ ASSETS = [
     ("UTILITIES", "EUR", "SPYU.DE", "UTILITIES.PNG", "EUR.PNG"),
     ("UTILITIES", "USA", "2B7A.DE", "UTILITIES.PNG", "USA.PNG"),
     ("UTILITIES", "WRL", "WELD.DE", "UTILITIES.PNG", "WRL.PNG"),
-    ("AI INFRA", "ALL", "AIFS.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("ARK INNOV", "WRL", "ARXK.DE", "THEMATIC.PNG", "WRL.PNG"),
-    ("CYBER SECURITY", "WRL", "USPY.DE", "THEMATIC.PNG", "WRL.PNG"),
-    ("DEFENSE EUR", "EUR", "EDFS.DE", "THEMATIC.PNG", "EUR.PNG"),
-    ("INFRA EUR", "EUR", "B41J.DE", "THEMATIC.PNG", "EUR.PNG"),
-    ("SEMICONDUCTOR", "ALL", "VVSM.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("URANIUM", "ALL", "NUKL.DE", "THEMATIC.PNG", "ALL.PNG")
+    ("THEMATIC", "ALL", "AIFS.DE", "THEMATIC.PNG", "ALL.PNG")
 ]
 
 # --- 6. SERVICIOS ---
 _img_cache = {}
 
 def get_img_b64(filename):
-    if not filename: return None
+    if not filename: return ""
     if filename in _img_cache: return _img_cache[filename]
     
     path = os.path.join(BASE_DIR, filename)
+    
     if not os.path.exists(path):
-        return None
+        # Modo depuración: Si no existe, devuelve el nombre para que lo veas en la tabla
+        return f"MISSING: {filename}"
+        
     try:
         with Image.open(path) as img:
-            # Convertir a RGBA para consistencia
             img = img.convert("RGBA")
-            img.thumbnail((35, 35))
+            img.thumbnail((30, 30))
             buf = io.BytesIO()
             img.save(buf, format="PNG")
             b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
             _img_cache[filename] = b64
             return b64
-    except:
-        return None
+    except Exception as e:
+        return f"ERR: {filename}"
 
 def get_rrg_pts(ticker_df, bench_df):
     rs = (ticker_df / bench_df) * 100
@@ -265,11 +255,11 @@ def load_data(tickers):
     except:
         return pd.DataFrame()
 
-# --- 7. PROCESAMIENTO ---
+# --- 7. FLUJO PRINCIPAL ---
 t_list = list(set([a[2] for a in ASSETS] + [BENCHMARK]))
-with st.status("ACTUALIZANDO MERCADOS...", expanded=False) as status:
+with st.status("ACTUALIZANDO...", expanded=False) as status:
     raw_prices = load_data(t_list)
-    status.update(label="DATOS LISTOS", state="complete")
+    status.update(label="CARGA COMPLETA", state="complete")
 
 if not raw_prices.empty:
     bench_p = raw_prices[BENCHMARK]
@@ -285,12 +275,10 @@ if not raw_prices.empty:
             idx = -(d + 1)
             pts.append((float(r_ser.iloc[idx]), float(m_ser.iloc[idx])))
 
-        # Cálculo de Score
         d_curr = np.sqrt((140 - pts[0][0]) ** 2 + (140 - pts[0][1]) ** 2)
         t_ax = np.array([1, 2, 3, 4, 5])
         xv, yv = np.array([p[0] for p in pts][::-1]), np.array([p[1] for p in pts][::-1])
-        sx, _ = np.polyfit(t_ax, xv, 1)
-        sy, _ = np.polyfit(t_ax, yv, 1)
+        sx, _ = np.polyfit(t_ax, xv, 1); sy, _ = np.polyfit(t_ax, yv, 1)
         angle = np.degrees(np.arctan2(sy, sx))
         diff = angle - 45
         if diff > 180: diff -= 360
@@ -321,14 +309,14 @@ if not raw_prices.empty:
         pos_sc = ((max_d - r['d_curr']) / (max_d - min_d)) * 10 if max_d != min_d else 5.0
         score = (pos_sc * WP) + (r['ang'] * WA) + (r['r2'] * WR)
         
-        # Asignación de iconos
-        ic_p = "pinguino.png" if r['tick'] in MY_PORTFOLIO else "PIRANHA.png" if r['tick'] in PIRANHA_ETFS else ""
+        # Lógica de icono de usuario
+        p_icon = "pinguino.png" if r['tick'] in MY_PORTFOLIO else "PIRANHA.png" if r['tick'] in PIRANHA_ETFS else ""
 
         final_rows.append({
             "Ver": (r['tick'] in MY_PORTFOLIO), 
             "Img_S": get_img_b64(r['isec']), 
             "Img_R": get_img_b64(r['ireg']),
-            "Img_P": get_img_b64(ic_p),
+            "Img_P": get_img_b64(p_icon),
             "Ticker": r['tick'], "Nombre": r['name'], "Score": round(score, 2),
             "P-Pos": round(pos_sc, 2), "P-Ang": round(r['ang'], 2), "P-R2": round(r['r2'], 2),
             "STR": round(r['str'], 2), "MOM": round(r['mom'], 2),
@@ -339,52 +327,17 @@ if not raw_prices.empty:
     df = pd.DataFrame(final_rows).sort_values("Score", ascending=False).reset_index(drop=True)
     df.insert(1, "#", range(1, len(df) + 1))
 
-    # --- 8. VISTA TABLA ---
+    # --- 8. VISTA ---
     conf = {
         "Ver": st.column_config.CheckboxColumn("Ver"), 
-        "Img_S": st.column_config.ImageColumn("Sec", width="small"),
-        "Img_R": st.column_config.ImageColumn("Reg", width="small"), 
-        "Img_P": st.column_config.ImageColumn("👤", width="small"),
+        "Img_S": st.column_config.ImageColumn("Sec"),
+        "Img_R": st.column_config.ImageColumn("Reg"), 
+        "Img_P": st.column_config.ImageColumn("👤"),
         "Score": st.column_config.NumberColumn("Nota"),
         "% Hoy": st.column_config.NumberColumn("% Hoy", format="%.2f%%"),
         "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%"),
     }
-    
     v_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "Ticker", "Nombre", "Score", "P-Pos", "P-Ang", "P-R2", "STR", "MOM", "% Hoy", "% 3M", "POS"]
     
-    edit_df = st.data_editor(df, hide_index=True, column_order=v_cols, column_config=conf,
-                             disabled=[c for c in v_cols if c != "Ver"], height=550)
-
-    # --- 9. GRÁFICA ---
-    plot_t = edit_df[edit_df["Ver"] == True]["Ticker"].tolist()
-    st.divider()
-    if plot_t:
-        fig, ax = plt.subplots(figsize=(10, 8))
-        all_x, all_y = [], []
-        for t in plot_t:
-            pts_raw = rrg_hist.get(t, [])
-            xs = np.array([p[0] - 100 for p in pts_raw][::-1])
-            ys = np.array([p[1] - 100 for p in pts_raw][::-1])
-            all_x.extend(xs); all_y.extend(ys)
-
-            if len(xs) >= 3:
-                tr = np.arange(len(xs))
-                td = np.linspace(0, len(xs)-1, 100)
-                xs_s = make_interp_spline(tr, xs, k=2)(td)
-                ys_s = make_interp_spline(tr, ys, k=2)(td)
-                ax.plot(xs_s, ys_s, lw=1.5, alpha=0.8)
-
-            ax.scatter(xs[:-1], ys[:-1], s=30, alpha=0.3)
-            ax.scatter(xs[-1], ys[-1], s=180, edgecolors='white', linewidth=2, zorder=5)
-            ax.text(xs[-1], ys[-1], f"  {t}", fontsize=10, fontweight='bold')
-
-        ax.axhline(0, c='#999999', lw=1); ax.axvline(0, c='#999999', lw=1)
-        limit = max(max(abs(min(all_x or [-10])), abs(max(all_x or [10]))), max(abs(min(all_y or [-10])), abs(max(all_y or [10])))) * 1.2
-        ax.set_xlim(-limit, limit); ax.set_ylim(-limit, limit)
-        
-        ax.add_patch(Rectangle((0, 0), limit, limit, color='green', alpha=0.05))
-        ax.add_patch(Rectangle((-limit, 0), limit, limit, color='blue', alpha=0.05))
-        ax.add_patch(Rectangle((-limit, -limit), limit, limit, color='red', alpha=0.05))
-        ax.add_patch(Rectangle((0, -limit), limit, limit, color='yellow', alpha=0.05))
-        
-        st.pyplot(fig)
+    st.data_editor(df, hide_index=True, column_order=v_cols, column_config=conf,
+                   disabled=[c for c in v_cols if c != "Ver"], height=550)
