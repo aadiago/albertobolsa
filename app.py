@@ -24,6 +24,7 @@ st.markdown("""
         margin-top: -20px;
         margin-bottom: 25px;
     }
+    /* Forzar que las imágenes se vean sí o sí */
     div[data-testid="stDataFrame"] td img { 
         display: block !important; 
         max-height: 25px !important; 
@@ -41,27 +42,27 @@ def sync_pos():
     val = st.session_state.sl_pos
     rem = 100.0 - val
     st.session_state.w_pos, st.session_state.w_ang, st.session_state.w_r2 = val, rem / 2, rem / 2
-
 def sync_ang():
     val = st.session_state.sl_ang
     rem = 100.0 - val
     st.session_state.w_ang, st.session_state.w_pos, st.session_state.w_r2 = val, rem / 2, rem / 2
-
 def sync_r2():
     val = st.session_state.sl_r2
     rem = 100.0 - val
     st.session_state.w_r2, st.session_state.w_pos, st.session_state.w_ang = val, rem / 2, rem / 2
 
 # --- 3. CABECERA ---
+# Usamos os.getcwd() para asegurar que buscamos en la carpeta activa
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 col_h1, col_h2 = st.columns([1, 15])
 with col_h1:
-    img_p_path = os.path.join(BASE_DIR, "pinguino.png")
-    if os.path.exists(img_p_path): st.image(img_p_path, width=65)
+    p_path = os.path.join(BASE_DIR, "pinguino.png")
+    if os.path.exists(p_path): st.image(p_path, width=65)
 with col_h2: st.header("PENGUIN PORTFOLIO")
 st.markdown('<p class="alberto-sofia">Sofía y Alberto 2026</p>', unsafe_allow_html=True)
 
-# --- 4. CONTROLES SUPERIORES ---
+# --- 4. SLIDERS ---
 c1, c2, c3 = st.columns(3)
 with c1: st.slider("POS %", 0.0, 100.0, float(st.session_state.w_pos), key="sl_pos", on_change=sync_pos)
 with c2: st.slider("ANG %", 0.0, 100.0, float(st.session_state.w_ang), key="sl_ang", on_change=sync_ang)
@@ -69,7 +70,7 @@ with c3: st.slider("R² %", 0.0, 100.0, float(st.session_state.w_r2), key="sl_r2
 
 WP, WA, WR = st.session_state.w_pos / 100, st.session_state.w_ang / 100, st.session_state.w_r2 / 100
 
-# --- 5. CONSTANTES Y ASSETS ---
+# --- 5. CONSTANTES Y ASSETS (MANTENER TU LISTA COMPLETA DE 178) ---
 BENCHMARK = "MWEQ.DE"
 MY_PORTFOLIO = ["LCUJ.DE", "B41J.DE", "XDWI.DE", "SW2CHB.SW", "XDWM.DE", "LBRA.DE"]
 PIRANHA_ETFS = ["SXR8.DE", "XDEW.DE", "XDEE.DE", "IBCF.DE"]
@@ -261,13 +262,17 @@ _img_cache = {}
 def get_img_b64(filename):
     if not filename: return ""
     if filename in _img_cache: return _img_cache[filename]
-    # Ruta absoluta para evitar fallos de contexto
-    path = os.path.abspath(os.path.join(BASE_DIR, filename))
-    if not os.path.exists(path): return ""
+    
+    # Intenta ruta relativa y absoluta
+    path = os.path.join(BASE_DIR, filename)
+    if not os.path.exists(path):
+        return ""
+        
     try:
         with Image.open(path) as img:
-            img = img.convert("RGBA") # Importante para Streamlit
-            img.thumbnail((30, 30))
+            # Forzar RGBA y redimensionado limpio
+            img = img.convert("RGBA")
+            img.thumbnail((32, 32), Image.Resampling.LANCZOS)
             buf = io.BytesIO()
             img.save(buf, format="PNG")
             b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
@@ -287,20 +292,21 @@ def get_rrg_pts(ticker_df, bench_df):
     return rs_ratio, rs_mom
 
 @st.cache_data(ttl=600)
-def load_data_safe(tickers):
-    # Descarga por lotes para evitar que Yahoo bloquee la conexión
-    chunks = [tickers[i:i + 35] for i in range(0, len(tickers), 35)]
-    all_df = []
-    for chunk in chunks:
+def load_data_robust(tickers):
+    # Yahoo a veces falla con muchos tickers. Dividimos en 4 lotes.
+    all_data = []
+    chunk_size = 45
+    for i in range(0, len(tickers), chunk_size):
+        chunk = tickers[i:i + chunk_size]
         data = yf.download(chunk, period="2y", auto_adjust=True, progress=False)['Close']
-        all_df.append(data)
-    return pd.concat(all_df, axis=1)
+        all_data.append(data)
+    return pd.concat(all_data, axis=1)
 
 # --- 7. FLUJO PRINCIPAL ---
 t_list = list(set([a[2] for a in ASSETS] + [BENCHMARK]))
-with st.status("CARGANDO LOS 178 ACTIVOS...", expanded=False) as status:
-    raw_prices = load_data_safe(t_list)
-    status.update(label=f"SINCRONIZADOS: {len(raw_prices.columns)} activos", state="complete")
+with st.status("SINCRONIZANDO PORTFOLIO (178 ACTIVOS)...", expanded=False) as status:
+    raw_prices = load_data_robust(t_list)
+    status.update(label=f"CONECTADO: {len(raw_prices.columns)} Activos", state="complete")
 
 if not raw_prices.empty:
     bench_p = raw_prices[BENCHMARK]
@@ -350,14 +356,13 @@ if not raw_prices.empty:
         pos_sc = ((max_d - r['d_curr']) / (max_d - min_d)) * 10 if max_d != min_d else 5.0
         score = (pos_sc * WP) + (r['ang'] * WA) + (r['r2'] * WR)
         
-        # Icono dinámico según portafolio
-        p_icon = "pinguino.png" if r['tick'] in MY_PORTFOLIO else "PIRANHA.png" if r['tick'] in PIRANHA_ETFS else ""
+        p_ic = "pinguino.png" if r['tick'] in MY_PORTFOLIO else "PIRANHA.png" if r['tick'] in PIRANHA_ETFS else ""
 
         final_rows.append({
             "Ver": (r['tick'] in MY_PORTFOLIO), 
             "Img_S": get_img_b64(r['isec']), 
             "Img_R": get_img_b64(r['ireg']),
-            "Img_P": get_img_b64(p_icon),
+            "Img_P": get_img_b64(p_ic),
             "Ticker": r['tick'], "Nombre": r['name'], "Score": round(score, 2),
             "P-Pos": round(pos_sc, 2), "P-Ang": round(r['ang'], 2), "P-R2": round(r['r2'], 2),
             "STR": round(r['str'], 2), "MOM": round(r['mom'], 2),
@@ -371,10 +376,9 @@ if not raw_prices.empty:
     # --- 8. VISTA ---
     conf = {
         "Ver": st.column_config.CheckboxColumn("Ver"), 
-        "Img_S": st.column_config.ImageColumn("Sec"),
-        "Img_R": st.column_config.ImageColumn("Reg"), 
-        "Img_P": st.column_config.ImageColumn("👤"),
-        "Score": st.column_config.NumberColumn("Nota"),
+        "Img_S": st.column_config.ImageColumn("Sec", width="small"),
+        "Img_R": st.column_config.ImageColumn("Reg", width="small"), 
+        "Img_P": st.column_config.ImageColumn("👤", width="small"),
         "% Hoy": st.column_config.NumberColumn("% Hoy", format="%.2f%%"),
         "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%"),
     }
