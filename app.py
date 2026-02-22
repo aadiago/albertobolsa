@@ -273,10 +273,8 @@ def get_img_b64(filename):
         with Image.open(path) as img:
             img = img.convert("RGBA")
             
-            # Condición especial para EME.PNG: hacerla más pequeña visualmente
             if filename.lower() == "eme.png":
                 img.thumbnail((24, 24), Image.Resampling.LANCZOS)
-                # Pegarla sobre un fondo transparente de 32x32 para que no se estire
                 bg = Image.new("RGBA", (32, 32), (255, 255, 255, 0))
                 offset = ((32 - img.width) // 2, (32 - img.height) // 2)
                 bg.paste(img, offset)
@@ -398,6 +396,7 @@ with tab_app:
             "Img_S": st.column_config.ImageColumn("Sec", width="small"),
             "Img_R": st.column_config.ImageColumn("Reg", width="small"), 
             "Img_P": st.column_config.ImageColumn("👤", width="small"),
+            "Nombre": st.column_config.TextColumn("Nombre", width=280),
             "% Hoy": st.column_config.NumberColumn("% Hoy", format="%.2f%%"),
             "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%"),
         }
