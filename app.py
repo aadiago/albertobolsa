@@ -268,7 +268,8 @@ def get_img_b64(filename):
 def get_rrg_pts(ticker_df, bench_df):
     rs = (ticker_df / bench_df) * 100
     rs_sm = rs.ewm(span=20, adjust=False).mean()
-    m_l, s_l = rs_sm.rolling(130).mean(), rs_sm.rolling(130).std()
+    # Modificado a 100 periodos
+    m_l, s_l = rs_sm.rolling(100).mean(), rs_sm.rolling(100).std()
     rs_ratio = ((rs_sm - m_l) / s_l.replace(0, 1)) * 10 + 100
     rs_mom_raw = rs_sm.pct_change(periods=20) * 100
     m_s, s_s = rs_mom_raw.rolling(20).mean(), rs_mom_raw.rolling(20).std()
@@ -425,8 +426,6 @@ with tab_manual:
     ### 2. El Corazón del Sistema: Coordenadas RRG
     Para saber si un activo está liderando o rezagado respecto al mundo, no miramos su precio aislado, sino su comportamiento relativo usando la metodología de los *Relative Rotation Graphs* (RRG). Generamos dos coordenadas: **Fuerza (X)** y **Momentum (Y)**.
     
-    
-    
     * **Paso A: Fuerza Relativa Básica (RS)**
         Se divide el precio del activo entre el precio del benchmark.
         $$RS=\left(\frac{Precio_{Activo}}{Precio_{Benchmark}}\right)\times 100$$
@@ -435,8 +434,8 @@ with tab_manual:
         Para evitar el "ruido" diario, se aplica una Media Móvil Exponencial (EMA) de 20 periodos a la serie $RS$, obteniendo el $RS_{sm}$.
     
     * **Paso C: Coordenada X (JdK RS-Ratio / STR)**
-        Mide la tendencia a largo plazo del activo frente al benchmark. Se normaliza el $RS_{sm}$ usando su media ($\mu$) y desviación estándar ($\sigma$) de los últimos 130 periodos (aprox. 6 meses). Se centra en 100.
-        $$X_{RRG}=\left(\frac{RS_{sm}-\mu_{130}}{\sigma_{130}}\right)\times 10+100$$
+        Mide la tendencia a largo plazo del activo frente al benchmark. Se normaliza el $RS_{sm}$ usando su media ($\mu$) y desviación estándar ($\sigma$) de los **últimos 100 periodos**. Se centra en 100.
+        $$X_{RRG}=\left(\frac{RS_{sm}-\mu_{100}}{\sigma_{100}}\right)\times 10+100$$
     
     * **Paso D: Coordenada Y (JdK RS-Momentum / MOM)**
         Mide la velocidad a la que cambia la fuerza relativa (la inercia a corto plazo). Se calcula la tasa de cambio porcentual a 20 periodos del $RS_{sm}$, y se vuelve a normalizar estadísticamente (media y desviación a 20 días).
