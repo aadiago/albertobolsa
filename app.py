@@ -37,7 +37,7 @@ with col_h1:
 with col_h2: st.header("PENGUIN PORTFOLIO")
 st.markdown('<p class="alberto-sofia">Sofía y Alberto 2026</p>', unsafe_allow_html=True)
 
-# --- 3. PARÁMETROS FIJOS (Sustituyen a los sliders) ---
+# --- 3. PARÁMETROS FIJOS ---
 WEIGHT_POS = 60.0
 WEIGHT_ANG = 30.0
 WEIGHT_R2 = 10.0
@@ -286,9 +286,10 @@ def load_data_robust(tickers):
 
 # --- 6. FLUJO PRINCIPAL ---
 t_list = list(set([a[2] for a in ASSETS] + [BENCHMARK]))
-with st.status("SINCRONIZANDO PORTFOLIO (178 ACTIVOS)...", expanded=False) as status:
+
+# Usamos st.spinner para que desaparezca al terminar de cargar
+with st.spinner("SINCRONIZANDO PORTFOLIO (178 ACTIVOS)..."):
     raw_prices = load_data_robust(t_list)
-    status.update(label=f"CONECTADO: {len(raw_prices.columns)} Activos", state="complete")
 
 if not raw_prices.empty:
     bench_p = raw_prices[BENCHMARK]
