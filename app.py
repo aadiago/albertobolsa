@@ -37,24 +37,20 @@ if 'w_pos' not in st.session_state: st.session_state.w_pos = 60.0
 if 'w_ang' not in st.session_state: st.session_state.w_ang = 30.0
 if 'w_r2' not in st.session_state: st.session_state.w_r2 = 10.0
 
-
 def sync_pos():
     val = st.session_state.sl_pos
     rem = 100.0 - val
     st.session_state.w_pos, st.session_state.w_ang, st.session_state.w_r2 = val, rem / 2, rem / 2
-
 
 def sync_ang():
     val = st.session_state.sl_ang
     rem = 100.0 - val
     st.session_state.w_ang, st.session_state.w_pos, st.session_state.w_r2 = val, rem / 2, rem / 2
 
-
 def sync_r2():
     val = st.session_state.sl_r2
     rem = 100.0 - val
     st.session_state.w_r2, st.session_state.w_pos, st.session_state.w_ang = val, rem / 2, rem / 2
-
 
 # --- 3. CABECERA ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -262,15 +258,15 @@ ASSETS = [
 # --- 6. SERVICIOS ---
 _img_cache = {}
 
-
 def get_img_b64(filename):
     if not filename: return ""
     if filename in _img_cache: return _img_cache[filename]
-    path = os.path.join(BASE_DIR, filename)
+    # Ruta absoluta para evitar fallos de contexto
+    path = os.path.abspath(os.path.join(BASE_DIR, filename))
     if not os.path.exists(path): return ""
     try:
         with Image.open(path) as img:
-            img = img.convert("RGBA")  # Asegura compatibilidad
+            img = img.convert("RGBA") # Importante para Streamlit
             img.thumbnail((30, 30))
             buf = io.BytesIO()
             img.save(buf, format="PNG")
@@ -279,7 +275,6 @@ def get_img_b64(filename):
             return b64
     except:
         return ""
-
 
 def get_rrg_pts(ticker_df, bench_df):
     rs = (ticker_df / bench_df) * 100
@@ -291,23 +286,21 @@ def get_rrg_pts(ticker_df, bench_df):
     rs_mom = ((rs_mom_raw - m_s) / s_s.replace(0, 1)) * 10 + 100
     return rs_ratio, rs_mom
 
-
 @st.cache_data(ttl=600)
-def load_data_batch(tickers):
-    # Descarga en lotes de 30 para evitar timeouts de Yahoo Finance
-    all_data = []
-    for i in range(0, len(tickers), 30):
-        chunk = tickers[i:i + 30]
+def load_data_safe(tickers):
+    # Descarga por lotes para evitar que Yahoo bloquee la conexión
+    chunks = [tickers[i:i + 35] for i in range(0, len(tickers), 35)]
+    all_df = []
+    for chunk in chunks:
         data = yf.download(chunk, period="2y", auto_adjust=True, progress=False)['Close']
-        all_data.append(data)
-    return pd.concat(all_data, axis=1)
-
+        all_df.append(data)
+    return pd.concat(all_df, axis=1)
 
 # --- 7. FLUJO PRINCIPAL ---
 t_list = list(set([a[2] for a in ASSETS] + [BENCHMARK]))
-with st.status("CARGANDO 178 ACTIVOS...", expanded=False) as status:
-    raw_prices = load_data_batch(t_list)
-    status.update(label=f"PROCESADOS: {len(raw_prices.columns)} activos", state="complete")
+with st.status("CARGANDO LOS 178 ACTIVOS...", expanded=False) as status:
+    raw_prices = load_data_safe(t_list)
+    status.update(label=f"SINCRONIZADOS: {len(raw_prices.columns)} activos", state="complete")
 
 if not raw_prices.empty:
     bench_p = raw_prices[BENCHMARK]
@@ -326,25 +319,21 @@ if not raw_prices.empty:
         d_curr = np.sqrt((140 - pts[0][0]) ** 2 + (140 - pts[0][1]) ** 2)
         t_ax = np.array([1, 2, 3, 4, 5])
         xv, yv = np.array([p[0] for p in pts][::-1]), np.array([p[1] for p in pts][::-1])
-        sx, _ = np.polyfit(t_ax, xv, 1)
-        sy, _ = np.polyfit(t_ax, yv, 1)
+        sx, _ = np.polyfit(t_ax, xv, 1); sy, _ = np.polyfit(t_ax, yv, 1)
         angle = np.degrees(np.arctan2(sy, sx))
         diff = angle - 45
         if diff > 180: diff -= 360
         if diff < -180: diff += 360
         ang_val = np.clip(10 - (abs(diff) / 18), 0, 10)
 
-
         def get_r2(t, v, s):
             res = np.sum((v - (s * t + (np.mean(v) - s * np.mean(t)))) ** 2)
             tot = np.sum((v - np.mean(v)) ** 2)
             return 1 - (res / tot) if tot > 1e-6 else 0
 
-
         r2_sc = np.clip(((get_r2(t_ax, xv, sx) + get_r2(t_ax, yv, sy)) / 2) * 10, 0, 10)
         ret1d = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-2]) - 1) * 100
-        ret3m = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-63]) - 1) * 100 if len(
-            raw_prices[tick]) >= 63 else 0
+        ret3m = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-63]) - 1) * 100 if len(raw_prices[tick]) >= 63 else 0
 
         res_raw.append({
             "tick": tick, "name": name, "reg": reg, "isec": isec, "ireg": ireg,
@@ -360,21 +349,20 @@ if not raw_prices.empty:
     for r in res_raw:
         pos_sc = ((max_d - r['d_curr']) / (max_d - min_d)) * 10 if max_d != min_d else 5.0
         score = (pos_sc * WP) + (r['ang'] * WA) + (r['r2'] * WR)
-
+        
         # Icono dinámico según portafolio
         p_icon = "pinguino.png" if r['tick'] in MY_PORTFOLIO else "PIRANHA.png" if r['tick'] in PIRANHA_ETFS else ""
 
         final_rows.append({
-            "Ver": (r['tick'] in MY_PORTFOLIO),
-            "Img_S": get_img_b64(r['isec']),
+            "Ver": (r['tick'] in MY_PORTFOLIO), 
+            "Img_S": get_img_b64(r['isec']), 
             "Img_R": get_img_b64(r['ireg']),
             "Img_P": get_img_b64(p_icon),
             "Ticker": r['tick'], "Nombre": r['name'], "Score": round(score, 2),
             "P-Pos": round(pos_sc, 2), "P-Ang": round(r['ang'], 2), "P-R2": round(r['r2'], 2),
             "STR": round(r['str'], 2), "MOM": round(r['mom'], 2),
             "% Hoy": round(r['r1d'], 2), "% 3M": round(r['r3m'], 2),
-            "POS": "Leading" if r['str'] >= 0 and r['mom'] >= 0 else "Weakening" if r['str'] >= 0 and r[
-                'mom'] < 0 else "Lagging" if r['str'] < 0 and r['mom'] < 0 else "Improving"
+            "POS": "Leading" if r['str'] >= 0 and r['mom'] >= 0 else "Weakening" if r['str'] >= 0 and r['mom'] < 0 else "Lagging" if r['str'] < 0 and r['mom'] < 0 else "Improving"
         })
 
     df = pd.DataFrame(final_rows).sort_values("Score", ascending=False).reset_index(drop=True)
@@ -382,21 +370,20 @@ if not raw_prices.empty:
 
     # --- 8. VISTA ---
     conf = {
-        "Ver": st.column_config.CheckboxColumn("Ver"),
+        "Ver": st.column_config.CheckboxColumn("Ver"), 
         "Img_S": st.column_config.ImageColumn("Sec"),
-        "Img_R": st.column_config.ImageColumn("Reg"),
+        "Img_R": st.column_config.ImageColumn("Reg"), 
         "Img_P": st.column_config.ImageColumn("👤"),
         "Score": st.column_config.NumberColumn("Nota"),
         "% Hoy": st.column_config.NumberColumn("% Hoy", format="%.2f%%"),
         "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%"),
     }
-    v_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "Ticker", "Nombre", "Score", "P-Pos", "P-Ang", "P-R2", "STR",
-              "MOM", "% Hoy", "% 3M", "POS"]
-
+    v_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "Ticker", "Nombre", "Score", "P-Pos", "P-Ang", "P-R2", "STR", "MOM", "% Hoy", "% 3M", "POS"]
+    
     edit_df = st.data_editor(df, hide_index=True, column_order=v_cols, column_config=conf,
                              disabled=[c for c in v_cols if c != "Ver"], height=550)
 
-    # --- 9. GRÁFICA RRG (Restaurada) ---
+    # --- 9. GRÁFICA RRG ---
     plot_t = edit_df[edit_df["Ver"] == True]["Ticker"].tolist()
     st.divider()
     if plot_t:
@@ -406,15 +393,12 @@ if not raw_prices.empty:
             pts_raw = rrg_hist.get(t, [])
             xs = np.array([p[0] - 100 for p in pts_raw][::-1])
             ys = np.array([p[1] - 100 for p in pts_raw][::-1])
-            all_x.extend(xs)
-            all_y.extend(ys)
+            all_x.extend(xs); all_y.extend(ys)
 
             if len(xs) >= 3:
                 tr = np.arange(len(xs))
                 td = np.linspace(0, len(xs) - 1, 100)
-                xs_s = make_interp_spline(tr, xs, k=2)(td)
-                ys_s = make_interp_spline(tr, ys, k=2)(td)
-                ax.plot(xs_s, ys_s, lw=1.5, alpha=0.7)
+                ax.plot(make_interp_spline(tr, xs, k=2)(td), make_interp_spline(tr, ys, k=2)(td), lw=1.5, alpha=0.7)
 
             ax.scatter(xs[:-1], ys[:-1], s=25, alpha=0.4)
             ax.scatter(xs[-1], ys[-1], s=160, edgecolors='white', linewidth=1.5, zorder=5)
@@ -422,11 +406,10 @@ if not raw_prices.empty:
 
         ax.axhline(0, c='#CCCCCC', lw=1, zorder=1)
         ax.axvline(0, c='#CCCCCC', lw=1, zorder=1)
-
+        
         limit = max([abs(val) for val in all_x + all_y] + [10]) * 1.3
-        ax.set_xlim(-limit, limit)
-        ax.set_ylim(-limit, limit)
-
+        ax.set_xlim(-limit, limit); ax.set_ylim(-limit, limit)
+        
         ax.add_patch(Rectangle((0, 0), limit, limit, color='green', alpha=0.04))
         ax.add_patch(Rectangle((-limit, 0), limit, limit, color='blue', alpha=0.04))
         ax.add_patch(Rectangle((-limit, -limit), limit, limit, color='red', alpha=0.04))
