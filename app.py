@@ -16,44 +16,30 @@ st.set_page_config(layout="wide", page_title="PENGUIN PORTFOLIO PRO", page_icon=
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:italic,wght@400;700&display=swap');
-    
-    /* Reducción drástica del espacio de la cabecera */
-    .block-container {
-        padding-top: 1rem !important;
-        padding-bottom: 1rem !important;
-    }
-    .main-title {
-        font-size: 1.8rem;
-        font-weight: bold;
-        margin-bottom: -15px;
-        padding-top: 5px;
-        color: #1E1E1E;
-    }
     .alberto-sofia {
         font-family: 'Playfair Display', serif;
         font-style: italic;
-        font-size: 1.1rem;
+        font-size: 1.6rem;
         color: #4A4A4A;
-        margin-top: 0px;
-        margin-bottom: 5px;
+        margin-top: -20px;
+        margin-bottom: 25px;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. CABECERA COMPACTA ---
+# --- 2. CABECERA ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-col_h1, col_h2 = st.columns([1, 20])
+col_h1, col_h2 = st.columns([1, 15])
 with col_h1:
     p_path = os.path.join(BASE_DIR, "pinguino.png")
-    if os.path.exists(p_path): st.image(p_path, width=45)
-with col_h2: 
-    st.markdown('<p class="main-title">PENGUIN PORTFOLIO</p>', unsafe_allow_html=True)
-    st.markdown('<p class="alberto-sofia">Sofía y Alberto 2026</p>', unsafe_allow_html=True)
+    if os.path.exists(p_path): st.image(p_path, width=65)
+with col_h2: st.header("PENGUIN PORTFOLIO")
+st.markdown('<p class="alberto-sofia">Sofía y Alberto 2026</p>', unsafe_allow_html=True)
 
-# --- 3. PARÁMETROS FIJOS (SWING TRADING) ---
-WEIGHT_POS = 30.0
-WEIGHT_ANG = 60.0
+# --- 3. PARÁMETROS FIJOS ---
+WEIGHT_POS = 60.0
+WEIGHT_ANG = 30.0
 WEIGHT_R2 = 10.0
 
 WP = WEIGHT_POS / 100
@@ -281,14 +267,11 @@ def get_img_b64(filename):
 
 def get_rrg_pts(ticker_df, bench_df):
     rs = (ticker_df / bench_df) * 100
-    # Ajuste Swing Trading: Media rápida de 10 periodos
-    rs_sm = rs.ewm(span=10, adjust=False).mean()
-    # Ajuste Swing Trading: Fuerza relativa sobre los últimos 60 días (~3 meses)
-    m_l, s_l = rs_sm.rolling(60).mean(), rs_sm.rolling(60).std()
+    rs_sm = rs.ewm(span=20, adjust=False).mean()
+    m_l, s_l = rs_sm.rolling(130).mean(), rs_sm.rolling(130).std()
     rs_ratio = ((rs_sm - m_l) / s_l.replace(0, 1)) * 10 + 100
-    # Ajuste Swing Trading: Momentum evaluado a 10 días vista
-    rs_mom_raw = rs_sm.pct_change(periods=10) * 100
-    m_s, s_s = rs_mom_raw.rolling(10).mean(), rs_mom_raw.rolling(10).std()
+    rs_mom_raw = rs_sm.pct_change(periods=20) * 100
+    m_s, s_s = rs_mom_raw.rolling(20).mean(), rs_mom_raw.rolling(20).std()
     rs_mom = ((rs_mom_raw - m_s) / s_s.replace(0, 1)) * 10 + 100
     return rs_ratio, rs_mom
 
@@ -336,7 +319,6 @@ with tab_app:
             if diff < -180: diff += 360
             ang_val = np.clip(10 - (abs(diff) / 18), 0, 10)
 
-            # R2 se mantiene con 63 periodos para filtrar volatilidad ruidosa
             prices_63 = raw_prices[tick].dropna().tail(63).values
             if len(prices_63) > 1:
                 t_price = np.arange(len(prices_63))
@@ -433,32 +415,32 @@ with tab_app:
 
 with tab_manual:
     st.markdown(r"""
-    ## MANUAL TÉCNICO: MOTOR DE CÁLCULO PENGUIN PORTFOLIO PRO (VERSIÓN SWING TRADING)
+    ## MANUAL TÉCNICO: MOTOR DE CÁLCULO PENGUIN PORTFOLIO PRO
     
-    Este sistema está calibrado específicamente para operaciones de *swing trading* de corto plazo (2 a 5 semanas). Se priman los activos que están realizando rotaciones agresivas en este momento sobre aquellos que tienen un largo historial de liderazgo inercial.
-
     ### 1. Obtención de Datos Base
     El proceso arranca descargando los precios de cierre ajustados (`Close`) de los últimos 2 años para todos los activos de la lista y para el índice de referencia o *benchmark* (en este caso, `MWEQ.DE`, el MSCI World Equal Weight).
     
     ---
     
-    ### 2. El Corazón del Sistema: Coordenadas RRG Adaptadas
-    Para saber si un activo está liderando o rezagado respecto al mundo, no miramos su precio aislado, sino su comportamiento relativo usando la metodología de los *Relative Rotation Graphs* (RRG).
+    ### 2. El Corazón del Sistema: Coordenadas RRG
+    Para saber si un activo está liderando o rezagado respecto al mundo, no miramos su precio aislado, sino su comportamiento relativo usando la metodología de los *Relative Rotation Graphs* (RRG). Generamos dos coordenadas: **Fuerza (X)** y **Momentum (Y)**.
+    
+    
     
     * **Paso A: Fuerza Relativa Básica (RS)**
         Se divide el precio del activo entre el precio del benchmark.
         $$RS=\left(\frac{Precio_{Activo}}{Precio_{Benchmark}}\right)\times 100$$
         
-    * **Paso B: Suavizado Rápido**
-        Para evitar el "ruido" diario sin perder velocidad de reacción, se aplica una Media Móvil Exponencial (EMA) rápida de **10 periodos** a la serie $RS$, obteniendo el $RS_{sm}$.
+    * **Paso B: Suavizado**
+        Para evitar el "ruido" diario, se aplica una Media Móvil Exponencial (EMA) de 20 periodos a la serie $RS$, obteniendo el $RS_{sm}$.
     
     * **Paso C: Coordenada X (JdK RS-Ratio / STR)**
-        Mide la tendencia del activo frente al benchmark. Al buscar *swings* cortos, se normaliza el $RS_{sm}$ usando su media ($\mu$) y desviación estándar ($\sigma$) de los **últimos 60 periodos** (aprox. 3 meses, en lugar de los 130 tradicionales). Se centra en 100.
-        $$X_{RRG}=\left(\frac{RS_{sm}-\mu_{60}}{\sigma_{60}}\right)\times 10+100$$
+        Mide la tendencia a largo plazo del activo frente al benchmark. Se normaliza el $RS_{sm}$ usando su media ($\mu$) y desviación estándar ($\sigma$) de los últimos 130 periodos (aprox. 6 meses). Se centra en 100.
+        $$X_{RRG}=\left(\frac{RS_{sm}-\mu_{130}}{\sigma_{130}}\right)\times 10+100$$
     
     * **Paso D: Coordenada Y (JdK RS-Momentum / MOM)**
-        Mide la velocidad a la que cambia la fuerza relativa. Se calcula la tasa de cambio porcentual rápida a **10 periodos** del $RS_{sm}$, y se vuelve a normalizar estadísticamente a 10 días.
-        $$Y_{RRG}=\left(\frac{\Delta\%RS_{sm}-\mu_{10}}{\sigma_{10}}\right)\times 10+100$$
+        Mide la velocidad a la que cambia la fuerza relativa (la inercia a corto plazo). Se calcula la tasa de cambio porcentual a 20 periodos del $RS_{sm}$, y se vuelve a normalizar estadísticamente (media y desviación a 20 días).
+        $$Y_{RRG}=\left(\frac{\Delta\%RS_{sm}-\mu_{20}}{\sigma_{20}}\right)\times 10+100$$
     
     ---
     
@@ -475,31 +457,32 @@ with tab_manual:
     No nos conformamos con que un activo esté en el cuadrante verde (Leading); queremos premiar a los que están más arriba y a la derecha. Definimos un **punto ideal teórico** en las coordenadas (140, 140).
     Se calcula la distancia euclidiana ($d$) del activo actual a ese punto ideal:
     $$d=\sqrt{(140-X_{RRG})^2+(140-Y_{RRG})^2}$$
-    Esta distancia se invierte y se escala de 0 a 10.
+    Esta distancia se invierte y se escala de 0 a 10. El activo más cercano al punto ideal obtiene un 10; el más lejano, un 0.
     
     ---
     
     ### 5. Puntuación 2: Ángulo de Ataque (P-Ang)
-    **Esta es la métrica clave del sistema de Swing Trading.** Queremos comprar activos cuya "cola" en el gráfico apunte en la dirección correcta: hacia arriba y a la derecha (45 grados), evidenciando una rotación violenta en el último mes.
-    Se toman los últimos 5 puntos del RRG del activo en intervalos de 5 días. Se aplica una regresión lineal y calculamos el ángulo de esa trayectoria:
+    Queremos comprar activos cuya "cola" en el gráfico apunte en la dirección correcta: hacia arriba y a la derecha (45 grados).
+    Se toman los últimos 5 puntos del RRG del activo en intervalos de 5 días (es decir, la ruta de las últimas 3 semanas). Se aplica una regresión lineal sobre los ejes del tiempo para ver cómo avanzan la $X$ y la $Y$.
+    Calculamos el ángulo de esa trayectoria:
     $$\theta=\arctan\left(\frac{Pendiente_Y}{Pendiente_X}\right)$$
-    Se penalizan las desviaciones respecto al ideal de 45° y se proyecta en una nota de 0 a 10.
+    El ángulo ideal es 45°. Calculamos la diferencia entre el ángulo real y 45°. Se penalizan las desviaciones y se proyecta en una nota de 0 a 10 (donde apuntar exactamente a 45° da un 10).
     
     ---
     
     ### 6. Puntuación 3: Linealidad del Precio (P-R2)
-    Aunque busquemos *swings* rápidos, requerimos una base estable para que el activo no sea puramente ruido. Tomamos los precios reales de los **últimos 63 días**.
-    Se traza una línea de tendencia ideal sobre esos precios y se calcula el coeficiente de determinación ($R^2$).
+    Queremos activos con subidas limpias, sin sobresaltos. Tomamos los **precios de cierre reales de los últimos 63 días** (3 meses).
+    Se traza una línea de tendencia ideal (regresión lineal) sobre esos precios y se calcula el coeficiente de determinación ($R^2$), que mide cuánto se ajusta el precio real a esa línea perfecta.
     $$R^2=1-\frac{\sum(Precio_{Real}-Precio_{Teorico})^2}{\sum(Precio_{Real}-Media_{Precio})^2}$$
-    El resultado se multiplica por 10.
+    El resultado (que va de 0 a 1) se multiplica por 10 para obtener una nota sobre 10.
     
     ---
     
     ### 7. Nota Definitiva (Score)
-    El programa pondera las notas priorizando agresivamente el Ángulo de rotación sobre la Posición absoluta en el gráfico:
-    * **30%** Peso a la Posición en el gráfico (P-Pos).
-    * **60%** Peso al Ángulo de rotación reciente (P-Ang). *¡Prioridad máxima para Swing Trading!*
+    Por último, el programa pondera las tres notas anteriores según los parámetros preestablecidos en el código:
+    * **60%** Peso a la Posición en el gráfico (P-Pos).
+    * **30%** Peso al Ángulo de ataque (P-Ang).
     * **10%** Peso a la Linealidad del precio (P-R2).
     
-    $$Score=(P_{Pos}\times 0.30)+(P_{Ang}\times 0.60)+(P_{R^2}\times 0.10)$$
+    $$Score=(P_{Pos}\times 0.60)+(P_{Ang}\times 0.30)+(P_{R^2}\times 0.10)$$
     """)
