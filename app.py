@@ -234,7 +234,6 @@ ASSETS = [
 
 # --- 5. SERVICIOS ---
 _img_cache = {}
-# Píxel transparente 1x1 en base64 para evitar el texto "None"
 TRANSPARENT_1X1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
 
 def get_img_b64(filename):
@@ -286,131 +285,204 @@ def load_data_robust(tickers):
         all_data.append(data)
     return pd.concat(all_data, axis=1)
 
-# --- 6. FLUJO PRINCIPAL ---
-t_list = list(set([a[2] for a in ASSETS] + [BENCHMARK]))
+# --- 6. PESTAÑAS Y FLUJO PRINCIPAL ---
+tab_app, tab_manual = st.tabs(["📊 PORTFOLIO", "📖 MANUAL TÉCNICO"])
 
-# Usamos st.spinner para que desaparezca al terminar de cargar
-with st.spinner("SINCRONIZANDO PORTFOLIO (178 ACTIVOS)..."):
-    raw_prices = load_data_robust(t_list)
+with tab_app:
+    t_list = list(set([a[2] for a in ASSETS] + [BENCHMARK]))
 
-if not raw_prices.empty:
-    bench_p = raw_prices[BENCHMARK]
-    res_raw, rrg_hist = [], {}
+    with st.spinner("SINCRONIZANDO PORTFOLIO (178 ACTIVOS)..."):
+        raw_prices = load_data_robust(t_list)
 
-    for name, reg, tick, isec, ireg in ASSETS:
-        if tick not in raw_prices.columns: continue
-        r_ser, m_ser = get_rrg_pts(raw_prices[tick], bench_p)
-        if r_ser.isna().all() or len(r_ser) < 30: continue
+    if not raw_prices.empty:
+        bench_p = raw_prices[BENCHMARK]
+        res_raw, rrg_hist = [], {}
 
-        pts = []
-        for d in [0, 5, 10, 15, 20]:
-            idx = -(d + 1)
-            pts.append((float(r_ser.iloc[idx]), float(m_ser.iloc[idx])))
+        for name, reg, tick, isec, ireg in ASSETS:
+            if tick not in raw_prices.columns: continue
+            r_ser, m_ser = get_rrg_pts(raw_prices[tick], bench_p)
+            if r_ser.isna().all() or len(r_ser) < 30: continue
 
-        d_curr = np.sqrt((140 - pts[0][0]) ** 2 + (140 - pts[0][1]) ** 2)
+            pts = []
+            for d in [0, 5, 10, 15, 20]:
+                idx = -(d + 1)
+                pts.append((float(r_ser.iloc[idx]), float(m_ser.iloc[idx])))
+
+            d_curr = np.sqrt((140 - pts[0][0]) ** 2 + (140 - pts[0][1]) ** 2)
+            
+            t_ax = np.array([1, 2, 3, 4, 5])
+            xv, yv = np.array([p[0] for p in pts][::-1]), np.array([p[1] for p in pts][::-1])
+            sx, _ = np.polyfit(t_ax, xv, 1); sy, _ = np.polyfit(t_ax, yv, 1)
+            angle = np.degrees(np.arctan2(sy, sx))
+            diff = angle - 45
+            if diff > 180: diff -= 360
+            if diff < -180: diff += 360
+            ang_val = np.clip(10 - (abs(diff) / 18), 0, 10)
+
+            prices_63 = raw_prices[tick].dropna().tail(63).values
+            if len(prices_63) > 1:
+                t_price = np.arange(len(prices_63))
+                slope_p, intercept_p = np.polyfit(t_price, prices_63, 1)
+                p_pred = slope_p * t_price + intercept_p
+                ss_tot = np.sum((prices_63 - np.mean(prices_63)) ** 2)
+                ss_res = np.sum((prices_63 - p_pred) ** 2)
+                r2_raw = 1 - (ss_res / ss_tot) if ss_tot > 1e-6 else 1.0
+                r2_sc = np.clip(r2_raw * 10, 0, 10)
+            else:
+                r2_sc = 0.0
+
+            ret1d = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-2]) - 1) * 100
+            ret3m = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-63]) - 1) * 100 if len(raw_prices[tick]) >= 63 else 0
+
+            res_raw.append({
+                "tick": tick, "name": name, "reg": reg, "isec": isec, "ireg": ireg,
+                "d_curr": d_curr, "ang": ang_val, "r2": r2_sc, "str": pts[0][0] - 100, "mom": pts[0][1] - 100,
+                "r1d": ret1d, "r3m": ret3m
+            })
+            rrg_hist[tick] = pts
+
+        dists = [r['d_curr'] for r in res_raw]
+        min_d, max_d = min(dists), max(dists)
+
+        final_rows = []
+        for r in res_raw:
+            pos_sc = ((max_d - r['d_curr']) / (max_d - min_d)) * 10 if max_d != min_d else 5.0
+            score = (pos_sc * WP) + (r['ang'] * WA) + (r['r2'] * WR)
+            
+            p_ic = "pinguino.png" if r['tick'] in MY_PORTFOLIO else "PIRANHA.png" if r['tick'] in PIRANHA_ETFS else None
+
+            final_rows.append({
+                "Ver": (r['tick'] in MY_PORTFOLIO), 
+                "Img_S": get_img_b64(r['isec']), 
+                "Img_R": get_img_b64(r['ireg']),
+                "Img_P": get_img_b64(p_ic),
+                "Ticker": r['tick'], "Nombre": r['name'], "Score": round(score, 2),
+                "P-Pos": round(pos_sc, 2), "P-Ang": round(r['ang'], 2), "P-R2": round(r['r2'], 2),
+                "STR": round(r['str'], 2), "MOM": round(r['mom'], 2),
+                "% Hoy": round(r['r1d'], 2), "% 3M": round(r['r3m'], 2),
+                "POS": "Leading" if r['str'] >= 0 and r['mom'] >= 0 else "Weakening" if r['str'] >= 0 and r['mom'] < 0 else "Lagging" if r['str'] < 0 and r['mom'] < 0 else "Improving"
+            })
+
+        df = pd.DataFrame(final_rows).sort_values("Score", ascending=False).reset_index(drop=True)
+        df.insert(1, "#", range(1, len(df) + 1))
+
+        conf = {
+            "Ver": st.column_config.CheckboxColumn("Ver"), 
+            "Img_S": st.column_config.ImageColumn("Sec", width="small"),
+            "Img_R": st.column_config.ImageColumn("Reg", width="small"), 
+            "Img_P": st.column_config.ImageColumn("👤", width="small"),
+            "% Hoy": st.column_config.NumberColumn("% Hoy", format="%.2f%%"),
+            "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%"),
+        }
+        v_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "Ticker", "Nombre", "Score", "P-Pos", "P-Ang", "P-R2", "STR", "MOM", "% Hoy", "% 3M", "POS"]
         
-        # --- Cálculo del ÁNGULO sobre el RRG (Se mantiene igual) ---
-        t_ax = np.array([1, 2, 3, 4, 5])
-        xv, yv = np.array([p[0] for p in pts][::-1]), np.array([p[1] for p in pts][::-1])
-        sx, _ = np.polyfit(t_ax, xv, 1); sy, _ = np.polyfit(t_ax, yv, 1)
-        angle = np.degrees(np.arctan2(sy, sx))
-        diff = angle - 45
-        if diff > 180: diff -= 360
-        if diff < -180: diff += 360
-        ang_val = np.clip(10 - (abs(diff) / 18), 0, 10)
+        edit_df = st.data_editor(df, hide_index=True, column_order=v_cols, column_config=conf,
+                                 disabled=[c for c in v_cols if c != "Ver"], height=550)
 
-        # --- Cálculo del R2 sobre la curva de PRECIOS (Últimos 63 periodos) ---
-        prices_63 = raw_prices[tick].dropna().tail(63).values
-        if len(prices_63) > 1:
-            t_price = np.arange(len(prices_63))
-            slope_p, intercept_p = np.polyfit(t_price, prices_63, 1)
-            p_pred = slope_p * t_price + intercept_p
-            ss_tot = np.sum((prices_63 - np.mean(prices_63)) ** 2)
-            ss_res = np.sum((prices_63 - p_pred) ** 2)
-            r2_raw = 1 - (ss_res / ss_tot) if ss_tot > 1e-6 else 1.0
-            r2_sc = np.clip(r2_raw * 10, 0, 10)
-        else:
-            r2_sc = 0.0
+        plot_t = edit_df[edit_df["Ver"] == True]["Ticker"].tolist()
+        st.divider()
+        if plot_t:
+            fig, ax = plt.subplots(figsize=(10, 8))
+            all_x, all_y = [], []
+            for t in plot_t:
+                pts_raw = rrg_hist.get(t, [])
+                xs = np.array([p[0] - 100 for p in pts_raw][::-1])
+                ys = np.array([p[1] - 100 for p in pts_raw][::-1])
+                all_x.extend(xs); all_y.extend(ys)
 
-        ret1d = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-2]) - 1) * 100
-        ret3m = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-63]) - 1) * 100 if len(raw_prices[tick]) >= 63 else 0
+                if len(xs) >= 3:
+                    tr = np.arange(len(xs))
+                    td = np.linspace(0, len(xs) - 1, 100)
+                    ax.plot(make_interp_spline(tr, xs, k=2)(td), make_interp_spline(tr, ys, k=2)(td), lw=1.5, alpha=0.7)
 
-        res_raw.append({
-            "tick": tick, "name": name, "reg": reg, "isec": isec, "ireg": ireg,
-            "d_curr": d_curr, "ang": ang_val, "r2": r2_sc, "str": pts[0][0] - 100, "mom": pts[0][1] - 100,
-            "r1d": ret1d, "r3m": ret3m
-        })
-        rrg_hist[tick] = pts
+                ax.scatter(xs[:-1], ys[:-1], s=25, alpha=0.4)
+                ax.scatter(xs[-1], ys[-1], s=160, edgecolors='white', linewidth=1.5, zorder=5)
+                ax.text(xs[-1], ys[-1], f"  {t}", fontsize=9, fontweight='bold', va='center')
 
-    dists = [r['d_curr'] for r in res_raw]
-    min_d, max_d = min(dists), max(dists)
+            ax.axhline(0, c='#CCCCCC', lw=1, zorder=1)
+            ax.axvline(0, c='#CCCCCC', lw=1, zorder=1)
+            
+            limit = max([abs(val) for val in all_x + all_y] + [10]) * 1.3
+            ax.set_xlim(-limit, limit); ax.set_ylim(-limit, limit)
+            
+            ax.add_patch(Rectangle((0, 0), limit, limit, color='green', alpha=0.04))
+            ax.add_patch(Rectangle((-limit, 0), limit, limit, color='blue', alpha=0.04))
+            ax.add_patch(Rectangle((-limit, -limit), limit, limit, color='red', alpha=0.04))
+            ax.add_patch(Rectangle((0, -limit), limit, limit, color='yellow', alpha=0.04))
 
-    final_rows = []
-    for r in res_raw:
-        pos_sc = ((max_d - r['d_curr']) / (max_d - min_d)) * 10 if max_d != min_d else 5.0
-        score = (pos_sc * WP) + (r['ang'] * WA) + (r['r2'] * WR)
-        
-        p_ic = "pinguino.png" if r['tick'] in MY_PORTFOLIO else "PIRANHA.png" if r['tick'] in PIRANHA_ETFS else None
+            st.pyplot(fig)
 
-        final_rows.append({
-            "Ver": (r['tick'] in MY_PORTFOLIO), 
-            "Img_S": get_img_b64(r['isec']), 
-            "Img_R": get_img_b64(r['ireg']),
-            "Img_P": get_img_b64(p_ic),
-            "Ticker": r['tick'], "Nombre": r['name'], "Score": round(score, 2),
-            "P-Pos": round(pos_sc, 2), "P-Ang": round(r['ang'], 2), "P-R2": round(r['r2'], 2),
-            "STR": round(r['str'], 2), "MOM": round(r['mom'], 2),
-            "% Hoy": round(r['r1d'], 2), "% 3M": round(r['r3m'], 2),
-            "POS": "Leading" if r['str'] >= 0 and r['mom'] >= 0 else "Weakening" if r['str'] >= 0 and r['mom'] < 0 else "Lagging" if r['str'] < 0 and r['mom'] < 0 else "Improving"
-        })
 
-    df = pd.DataFrame(final_rows).sort_values("Score", ascending=False).reset_index(drop=True)
-    df.insert(1, "#", range(1, len(df) + 1))
-
-    # --- 7. VISTA ---
-    conf = {
-        "Ver": st.column_config.CheckboxColumn("Ver"), 
-        "Img_S": st.column_config.ImageColumn("Sec", width="small"),
-        "Img_R": st.column_config.ImageColumn("Reg", width="small"), 
-        "Img_P": st.column_config.ImageColumn("👤", width="small"),
-        "% Hoy": st.column_config.NumberColumn("% Hoy", format="%.2f%%"),
-        "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%"),
-    }
-    v_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "Ticker", "Nombre", "Score", "P-Pos", "P-Ang", "P-R2", "STR", "MOM", "% Hoy", "% 3M", "POS"]
+with tab_manual:
+    st.markdown(r"""
+    ## MANUAL TÉCNICO: MOTOR DE CÁLCULO PENGUIN PORTFOLIO PRO
     
-    edit_df = st.data_editor(df, hide_index=True, column_order=v_cols, column_config=conf,
-                             disabled=[c for c in v_cols if c != "Ver"], height=550)
-
-    # --- 8. GRÁFICA RRG ---
-    plot_t = edit_df[edit_df["Ver"] == True]["Ticker"].tolist()
-    st.divider()
-    if plot_t:
-        fig, ax = plt.subplots(figsize=(10, 8))
-        all_x, all_y = [], []
-        for t in plot_t:
-            pts_raw = rrg_hist.get(t, [])
-            xs = np.array([p[0] - 100 for p in pts_raw][::-1])
-            ys = np.array([p[1] - 100 for p in pts_raw][::-1])
-            all_x.extend(xs); all_y.extend(ys)
-
-            if len(xs) >= 3:
-                tr = np.arange(len(xs))
-                td = np.linspace(0, len(xs) - 1, 100)
-                ax.plot(make_interp_spline(tr, xs, k=2)(td), make_interp_spline(tr, ys, k=2)(td), lw=1.5, alpha=0.7)
-
-            ax.scatter(xs[:-1], ys[:-1], s=25, alpha=0.4)
-            ax.scatter(xs[-1], ys[-1], s=160, edgecolors='white', linewidth=1.5, zorder=5)
-            ax.text(xs[-1], ys[-1], f"  {t}", fontsize=9, fontweight='bold', va='center')
-
-        ax.axhline(0, c='#CCCCCC', lw=1, zorder=1)
-        ax.axvline(0, c='#CCCCCC', lw=1, zorder=1)
+    ### 1. Obtención de Datos Base
+    El proceso arranca descargando los precios de cierre ajustados (`Close`) de los últimos 2 años para todos los activos de la lista y para el índice de referencia o *benchmark* (en este caso, `MWEQ.DE`, el MSCI World Equal Weight).
+    
+    ---
+    
+    ### 2. El Corazón del Sistema: Coordenadas RRG
+    Para saber si un activo está liderando o rezagado respecto al mundo, no miramos su precio aislado, sino su comportamiento relativo usando la metodología de los *Relative Rotation Graphs* (RRG). Generamos dos coordenadas: **Fuerza (X)** y **Momentum (Y)**.
+    
+    
+    
+    * **Paso A: Fuerza Relativa Básica (RS)**
+        Se divide el precio del activo entre el precio del benchmark.
+        $$RS=\left(\frac{Precio_{Activo}}{Precio_{Benchmark}}\right)\times 100$$
         
-        limit = max([abs(val) for val in all_x + all_y] + [10]) * 1.3
-        ax.set_xlim(-limit, limit); ax.set_ylim(-limit, limit)
-        
-        ax.add_patch(Rectangle((0, 0), limit, limit, color='green', alpha=0.04))
-        ax.add_patch(Rectangle((-limit, 0), limit, limit, color='blue', alpha=0.04))
-        ax.add_patch(Rectangle((-limit, -limit), limit, limit, color='red', alpha=0.04))
-        ax.add_patch(Rectangle((0, -limit), limit, limit, color='yellow', alpha=0.04))
-
-        st.pyplot(fig)
+    * **Paso B: Suavizado**
+        Para evitar el "ruido" diario, se aplica una Media Móvil Exponencial (EMA) de 20 periodos a la serie $RS$, obteniendo el $RS_{sm}$.
+    
+    * **Paso C: Coordenada X (JdK RS-Ratio / STR)**
+        Mide la tendencia a largo plazo del activo frente al benchmark. Se normaliza el $RS_{sm}$ usando su media ($\mu$) y desviación estándar ($\sigma$) de los últimos 130 periodos (aprox. 6 meses). Se centra en 100.
+        $$X_{RRG}=\left(\frac{RS_{sm}-\mu_{130}}{\sigma_{130}}\right)\times 10+100$$
+    
+    * **Paso D: Coordenada Y (JdK RS-Momentum / MOM)**
+        Mide la velocidad a la que cambia la fuerza relativa (la inercia a corto plazo). Se calcula la tasa de cambio porcentual a 20 periodos del $RS_{sm}$, y se vuelve a normalizar estadísticamente (media y desviación a 20 días).
+        $$Y_{RRG}=\left(\frac{\Delta\%RS_{sm}-\mu_{20}}{\sigma_{20}}\right)\times 10+100$$
+    
+    ---
+    
+    ### 3. Asignación de Cuadrantes (POS)
+    Dependiendo de dónde caigan las coordenadas X e Y (restando 100 para centrar el eje en el origen 0,0), el activo se clasifica en una de las cuatro fases del ciclo:
+    * **Leading (Líder):** $X \ge 0$ y $Y \ge 0$ (Fuerte y ganando inercia).
+    * **Weakening (Debilitándose):** $X \ge 0$ y $Y < 0$ (Fuerte pero perdiendo inercia).
+    * **Lagging (Rezagado):** $X < 0$ y $Y < 0$ (Débil y perdiendo inercia).
+    * **Improving (Mejorando):** $X < 0$ y $Y \ge 0$ (Débil pero ganando inercia).
+    
+    ---
+    
+    ### 4. Puntuación 1: Posición Óptima (P-Pos)
+    No nos conformamos con que un activo esté en el cuadrante verde (Leading); queremos premiar a los que están más arriba y a la derecha. Definimos un **punto ideal teórico** en las coordenadas (140, 140).
+    Se calcula la distancia euclidiana ($d$) del activo actual a ese punto ideal:
+    $$d=\sqrt{(140-X_{RRG})^2+(140-Y_{RRG})^2}$$
+    Esta distancia se invierte y se escala de 0 a 10. El activo más cercano al punto ideal obtiene un 10; el más lejano, un 0.
+    
+    ---
+    
+    ### 5. Puntuación 2: Ángulo de Ataque (P-Ang)
+    Queremos comprar activos cuya "cola" en el gráfico apunte en la dirección correcta: hacia arriba y a la derecha (45 grados).
+    Se toman los últimos 5 puntos del RRG del activo en intervalos de 5 días (es decir, la ruta de las últimas 3 semanas). Se aplica una regresión lineal sobre los ejes del tiempo para ver cómo avanzan la $X$ y la $Y$.
+    Calculamos el ángulo de esa trayectoria:
+    $$\theta=\arctan\left(\frac{Pendiente_Y}{Pendiente_X}\right)$$
+    El ángulo ideal es 45°. Calculamos la diferencia entre el ángulo real y 45°. Se penalizan las desviaciones y se proyecta en una nota de 0 a 10 (donde apuntar exactamente a 45° da un 10).
+    
+    ---
+    
+    ### 6. Puntuación 3: Linealidad del Precio (P-R2)
+    Queremos activos con subidas limpias, sin sobresaltos. Tomamos los **precios de cierre reales de los últimos 63 días** (3 meses).
+    Se traza una línea de tendencia ideal (regresión lineal) sobre esos precios y se calcula el coeficiente de determinación ($R^2$), que mide cuánto se ajusta el precio real a esa línea perfecta.
+    $$R^2=1-\frac{\sum(Precio_{Real}-Precio_{Teorico})^2}{\sum(Precio_{Real}-Media_{Precio})^2}$$
+    El resultado (que va de 0 a 1) se multiplica por 10 para obtener una nota sobre 10.
+    
+    ---
+    
+    ### 7. Nota Definitiva (Score)
+    Por último, el programa pondera las tres notas anteriores según los parámetros preestablecidos en el código:
+    * **60%** Peso a la Posición en el gráfico (P-Pos).
+    * **30%** Peso al Ángulo de ataque (P-Ang).
+    * **10%** Peso a la Linealidad del precio (P-R2).
+    
+    $$Score=(P_{Pos}\times 0.60)+(P_{Ang}\times 0.30)+(P_{R^2}\times 0.10)$$
+    """)
