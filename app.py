@@ -308,6 +308,8 @@ if not raw_prices.empty:
             pts.append((float(r_ser.iloc[idx]), float(m_ser.iloc[idx])))
 
         d_curr = np.sqrt((140 - pts[0][0]) ** 2 + (140 - pts[0][1]) ** 2)
+        
+        # --- Cálculo del ÁNGULO sobre el RRG (Se mantiene igual) ---
         t_ax = np.array([1, 2, 3, 4, 5])
         xv, yv = np.array([p[0] for p in pts][::-1]), np.array([p[1] for p in pts][::-1])
         sx, _ = np.polyfit(t_ax, xv, 1); sy, _ = np.polyfit(t_ax, yv, 1)
@@ -317,12 +319,19 @@ if not raw_prices.empty:
         if diff < -180: diff += 360
         ang_val = np.clip(10 - (abs(diff) / 18), 0, 10)
 
-        def get_r2(t, v, s):
-            res = np.sum((v - (s * t + (np.mean(v) - s * np.mean(t)))) ** 2)
-            tot = np.sum((v - np.mean(v)) ** 2)
-            return 1 - (res / tot) if tot > 1e-6 else 0
+        # --- Cálculo del R2 sobre la curva de PRECIOS (Últimos 63 periodos) ---
+        prices_63 = raw_prices[tick].dropna().tail(63).values
+        if len(prices_63) > 1:
+            t_price = np.arange(len(prices_63))
+            slope_p, intercept_p = np.polyfit(t_price, prices_63, 1)
+            p_pred = slope_p * t_price + intercept_p
+            ss_tot = np.sum((prices_63 - np.mean(prices_63)) ** 2)
+            ss_res = np.sum((prices_63 - p_pred) ** 2)
+            r2_raw = 1 - (ss_res / ss_tot) if ss_tot > 1e-6 else 1.0
+            r2_sc = np.clip(r2_raw * 10, 0, 10)
+        else:
+            r2_sc = 0.0
 
-        r2_sc = np.clip(((get_r2(t_ax, xv, sx) + get_r2(t_ax, yv, sy)) / 2) * 10, 0, 10)
         ret1d = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-2]) - 1) * 100
         ret3m = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-63]) - 1) * 100 if len(raw_prices[tick]) >= 63 else 0
 
