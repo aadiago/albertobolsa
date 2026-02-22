@@ -27,25 +27,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. LÓGICA DE CONTROLES ---
-if 'w_pos' not in st.session_state: st.session_state.w_pos = 60.0
-if 'w_ang' not in st.session_state: st.session_state.w_ang = 30.0
-if 'w_r2' not in st.session_state: st.session_state.w_r2 = 10.0
-
-def sync_pos():
-    val = st.session_state.sl_pos
-    rem = 100.0 - val
-    st.session_state.w_pos, st.session_state.w_ang, st.session_state.w_r2 = val, rem / 2, rem / 2
-def sync_ang():
-    val = st.session_state.sl_ang
-    rem = 100.0 - val
-    st.session_state.w_ang, st.session_state.w_pos, st.session_state.w_r2 = val, rem / 2, rem / 2
-def sync_r2():
-    val = st.session_state.sl_r2
-    rem = 100.0 - val
-    st.session_state.w_r2, st.session_state.w_pos, st.session_state.w_ang = val, rem / 2, rem / 2
-
-# --- 3. CABECERA ---
+# --- 2. CABECERA ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 col_h1, col_h2 = st.columns([1, 15])
@@ -55,15 +37,16 @@ with col_h1:
 with col_h2: st.header("PENGUIN PORTFOLIO")
 st.markdown('<p class="alberto-sofia">Sofía y Alberto 2026</p>', unsafe_allow_html=True)
 
-# --- 4. SLIDERS ---
-c1, c2, c3 = st.columns(3)
-with c1: st.slider("POS %", 0.0, 100.0, float(st.session_state.w_pos), key="sl_pos", on_change=sync_pos)
-with c2: st.slider("ANG %", 0.0, 100.0, float(st.session_state.w_ang), key="sl_ang", on_change=sync_ang)
-with c3: st.slider("R² %", 0.0, 100.0, float(st.session_state.w_r2), key="sl_r2", on_change=sync_r2)
+# --- 3. PARÁMETROS FIJOS (Sustituyen a los sliders) ---
+WEIGHT_POS = 60.0
+WEIGHT_ANG = 30.0
+WEIGHT_R2 = 10.0
 
-WP, WA, WR = st.session_state.w_pos / 100, st.session_state.w_ang / 100, st.session_state.w_r2 / 100
+WP = WEIGHT_POS / 100
+WA = WEIGHT_ANG / 100
+WR = WEIGHT_R2 / 100
 
-# --- 5. CONSTANTES Y ASSETS ---
+# --- 4. CONSTANTES Y ASSETS ---
 BENCHMARK = "MWEQ.DE"
 MY_PORTFOLIO = ["LCUJ.DE", "B41J.DE", "XDWI.DE", "SW2CHB.SW", "XDWM.DE", "LBRA.DE"]
 PIRANHA_ETFS = ["SXR8.DE", "XDEW.DE", "XDEE.DE", "IBCF.DE"]
@@ -249,14 +232,13 @@ ASSETS = [
     ("WEB 3.0", "WRL", "M37R.DE", "THEMATIC.PNG", "WRL.PNG")
 ]
 
-# --- 6. SERVICIOS ---
+# --- 5. SERVICIOS ---
 _img_cache = {}
 
 def get_img_b64(filename):
     if not filename: return None
     if filename in _img_cache: return _img_cache[filename]
     
-    # Búsqueda insensible a mayúsculas/minúsculas para evitar problemas al subir a la nube
     actual_filename = filename
     try:
         for f in os.listdir(BASE_DIR):
@@ -268,7 +250,7 @@ def get_img_b64(filename):
         
     path = os.path.join(BASE_DIR, actual_filename)
     if not os.path.exists(path):
-        return None  # Devolvemos None en lugar de "" para que Streamlit no se rompa
+        return None 
         
     try:
         with Image.open(path) as img:
@@ -302,7 +284,7 @@ def load_data_robust(tickers):
         all_data.append(data)
     return pd.concat(all_data, axis=1)
 
-# --- 7. FLUJO PRINCIPAL ---
+# --- 6. FLUJO PRINCIPAL ---
 t_list = list(set([a[2] for a in ASSETS] + [BENCHMARK]))
 with st.status("SINCRONIZANDO PORTFOLIO (178 ACTIVOS)...", expanded=False) as status:
     raw_prices = load_data_robust(t_list)
@@ -356,7 +338,6 @@ if not raw_prices.empty:
         pos_sc = ((max_d - r['d_curr']) / (max_d - min_d)) * 10 if max_d != min_d else 5.0
         score = (pos_sc * WP) + (r['ang'] * WA) + (r['r2'] * WR)
         
-        # Pasamos None si no se cumple ninguna condición para no enviar cadenas vacías
         p_ic = "pinguino.png" if r['tick'] in MY_PORTFOLIO else "PIRANHA.png" if r['tick'] in PIRANHA_ETFS else None
 
         final_rows.append({
@@ -374,7 +355,7 @@ if not raw_prices.empty:
     df = pd.DataFrame(final_rows).sort_values("Score", ascending=False).reset_index(drop=True)
     df.insert(1, "#", range(1, len(df) + 1))
 
-    # --- 8. VISTA ---
+    # --- 7. VISTA ---
     conf = {
         "Ver": st.column_config.CheckboxColumn("Ver"), 
         "Img_S": st.column_config.ImageColumn("Sec", width="small"),
@@ -388,7 +369,7 @@ if not raw_prices.empty:
     edit_df = st.data_editor(df, hide_index=True, column_order=v_cols, column_config=conf,
                              disabled=[c for c in v_cols if c != "Ver"], height=550)
 
-    # --- 9. GRÁFICA RRG ---
+    # --- 8. GRÁFICA RRG ---
     plot_t = edit_df[edit_df["Ver"] == True]["Ticker"].tolist()
     st.divider()
     if plot_t:
