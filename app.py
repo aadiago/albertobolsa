@@ -234,9 +234,11 @@ ASSETS = [
 
 # --- 5. SERVICIOS ---
 _img_cache = {}
+# Píxel transparente 1x1 en base64 para evitar el texto "None"
+TRANSPARENT_1X1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
 
 def get_img_b64(filename):
-    if not filename: return None
+    if not filename: return TRANSPARENT_1X1
     if filename in _img_cache: return _img_cache[filename]
     
     actual_filename = filename
@@ -250,7 +252,7 @@ def get_img_b64(filename):
         
     path = os.path.join(BASE_DIR, actual_filename)
     if not os.path.exists(path):
-        return None 
+        return TRANSPARENT_1X1 
         
     try:
         with Image.open(path) as img:
@@ -262,7 +264,7 @@ def get_img_b64(filename):
             _img_cache[filename] = b64
             return b64
     except:
-        return None
+        return TRANSPARENT_1X1
 
 def get_rrg_pts(ticker_df, bench_df):
     rs = (ticker_df / bench_df) * 100
