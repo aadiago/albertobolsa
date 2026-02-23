@@ -11,9 +11,6 @@ from PIL import Image
 import io
 
 # --- 1. PARÁMETROS POR DEFECTO DEL PROGRAMA ---
-DEF_WEIGHT_POS = 100.0
-DEF_WEIGHT_ANG = 0.0
-DEF_WEIGHT_R2 = 0.0
 DEF_RS_SMOOTH = 42
 DEF_PERIODO_X = 126
 DEF_PERIODO_Y = 42
@@ -314,26 +311,16 @@ tab_app, tab_params, tab_manual = st.tabs(["📊 PORTFOLIO", "⚙️ PARÁMETROS
 with tab_params:
     st.markdown("### Configuración del Motor RRG")
     with st.form("parametros_form"):
-        st.subheader("Pesos del Score (%)")
-        col1, col2, col3 = st.columns(3)
-        with col1: WEIGHT_POS = st.number_input("Peso Posición", min_value=0.0, max_value=100.0, value=DEF_WEIGHT_POS, step=5.0)
-        with col2: WEIGHT_ANG = st.number_input("Peso Ángulo", min_value=0.0, max_value=100.0, value=DEF_WEIGHT_ANG, step=5.0)
-        with col3: WEIGHT_R2 = st.number_input("Peso R2", min_value=0.0, max_value=100.0, value=DEF_WEIGHT_R2, step=5.0)
-
         st.subheader("Sensibilidad del Modelo")
-        col4, col5, col6 = st.columns(3)
-        with col4: RS_SMOOTH = st.number_input("Suavizado RS (Periodos)", min_value=1, max_value=100, value=DEF_RS_SMOOTH, step=1)
-        with col5: PERIODO_X = st.number_input("Periodo Eje X (STR)", min_value=10, max_value=252, value=DEF_PERIODO_X, step=5)
-        with col6: PERIODO_Y = st.number_input("Periodo Eje Y (MOM)", min_value=5, max_value=100, value=DEF_PERIODO_Y, step=1)
+        col1, col2, col3 = st.columns(3)
+        with col1: RS_SMOOTH = st.number_input("Suavizado RS (Periodos)", min_value=1, max_value=100, value=DEF_RS_SMOOTH, step=1)
+        with col2: PERIODO_X = st.number_input("Periodo Eje X (STR)", min_value=10, max_value=252, value=DEF_PERIODO_X, step=5)
+        with col3: PERIODO_Y = st.number_input("Periodo Eje Y (MOM)", min_value=5, max_value=100, value=DEF_PERIODO_Y, step=1)
 
         st.subheader("Gráfico")
         TAIL_LENGTH = st.number_input("Puntos de la cola (Saltos de 5 días)", min_value=3, max_value=20, value=DEF_TAIL_LENGTH, step=1)
 
         submit_button = st.form_submit_button("Actualizar Parámetros", use_container_width=True)
-
-WP = WEIGHT_POS / 100
-WA = WEIGHT_ANG / 100
-WR = WEIGHT_R2 / 100
 
 with tab_app:
     t_list = list(set([a[2] for a in ASSETS] + [BENCHMARK]))
@@ -360,62 +347,53 @@ with tab_app:
 
             if not pts: continue
 
-            d_curr = np.sqrt((140 - pts[0][0]) ** 2 + (140 - pts[0][1]) ** 2)
-            
-            t_ax = np.arange(1, len(pts) + 1)
-            xv, yv = np.array([p[0] for p in pts][::-1]), np.array([p[1] for p in pts][::-1])
-            sx, _ = np.polyfit(t_ax, xv, 1); sy, _ = np.polyfit(t_ax, yv, 1)
-            angle = np.degrees(np.arctan2(sy, sx))
-            diff = angle - 45
-            if diff > 180: diff -= 360
-            if diff < -180: diff += 360
-            ang_val = np.clip(10 - (abs(diff) / 18), 0, 10)
-
-            prices_63 = raw_prices[tick].dropna().tail(63).values
-            if len(prices_63) > 1:
-                t_price = np.arange(len(prices_63))
-                slope_p, intercept_p = np.polyfit(t_price, prices_63, 1)
-                p_pred = slope_p * t_price + intercept_p
-                ss_tot = np.sum((prices_63 - np.mean(prices_63)) ** 2)
-                ss_res = np.sum((prices_63 - p_pred) ** 2)
-                r2_raw = 1 - (ss_res / ss_tot) if ss_tot > 1e-6 else 1.0
-                r2_sc = np.clip(r2_raw * 10, 0, 10)
-            else:
-                r2_sc = 0.0
+            # Distancia euclídea del eje (0,0) al último punto de la cola (posición actual)
+            str_val = pts[0][0] - 100
+            mom_val = pts[0][1] - 100
+            score_dist = np.sqrt(str_val**2 + mom_val**2)
 
             ret1d = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-2]) - 1) * 100
             ret3m = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-63]) - 1) * 100 if len(raw_prices[tick]) >= 63 else 0
 
+            # Determinar fase para ordenar e icono
+            if str_val >= 0 and mom_val >= 0:
+                pos_str = "🟢 Leading"
+                sort_order = 1
+            elif str_val < 0 and mom_val >= 0:
+                pos_str = "🔵 Improving"
+                sort_order = 2
+            elif str_val >= 0 and mom_val < 0:
+                pos_str = "🟡 Weakening"
+                sort_order = 3
+            else:
+                pos_str = "🔴 Lagging"
+                sort_order = 4
+
             res_raw.append({
                 "tick": tick, "name": name, "reg": reg, "isec": isec, "ireg": ireg,
-                "d_curr": d_curr, "ang": ang_val, "r2": r2_sc, "str": pts[0][0] - 100, "mom": pts[0][1] - 100,
-                "r1d": ret1d, "r3m": ret3m
+                "score": score_dist, "str": str_val, "mom": mom_val,
+                "r1d": ret1d, "r3m": ret3m, "pos_str": pos_str, "sort_order": sort_order
             })
             rrg_hist[tick] = pts
 
-        dists = [r['d_curr'] for r in res_raw]
-        min_d, max_d = min(dists), max(dists)
-
         final_rows = []
         for r in res_raw:
-            pos_sc = ((max_d - r['d_curr']) / (max_d - min_d)) * 10 if max_d != min_d else 5.0
-            score = (pos_sc * WP) + (r['ang'] * WA) + (r['r2'] * WR)
-            
             p_ic = "pinguino.png" if r['tick'] in MY_PORTFOLIO else "PIRANHA.png" if r['tick'] in PIRANHA_ETFS else None
 
             final_rows.append({
                 "Ver": (r['tick'] in MY_PORTFOLIO), 
+                "Sort_Order": r['sort_order'],
                 "Img_S": get_img_b64(r['isec']), 
                 "Img_R": get_img_b64(r['ireg']),
                 "Img_P": get_img_b64(p_ic),
-                "Ticker": r['tick'], "Nombre": r['name'], "Score": round(score, 2),
-                "P-Pos": round(pos_sc, 2), "P-Ang": round(r['ang'], 2), "P-R2": round(r['r2'], 2),
+                "Ticker": r['tick'], "Nombre": r['name'], "Score": round(r['score'], 2),
                 "STR": round(r['str'], 2), "MOM": round(r['mom'], 2),
                 "% Hoy": round(r['r1d'], 2), "% 3M": round(r['r3m'], 2),
-                "POS": "Leading" if r['str'] >= 0 and r['mom'] >= 0 else "Weakening" if r['str'] >= 0 and r['mom'] < 0 else "Lagging" if r['str'] < 0 and r['mom'] < 0 else "Improving"
+                "POS": r['pos_str']
             })
 
-        df = pd.DataFrame(final_rows).sort_values("Score", ascending=False).reset_index(drop=True)
+        # Ordenar: Primero por categoría (Leading > Improving > Weakening > Lagging), luego por Score (descendente)
+        df = pd.DataFrame(final_rows).sort_values(by=["Sort_Order", "Score"], ascending=[True, False]).reset_index(drop=True)
         df.insert(1, "#", range(1, len(df) + 1))
 
         conf = {
@@ -428,7 +406,7 @@ with tab_app:
             "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%"),
         }
         
-        v_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "Ticker", "Nombre", "Score", "% Hoy", "% 3M", "P-Pos", "P-Ang", "P-R2", "STR", "MOM", "POS"]
+        v_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "Ticker", "Nombre", "Score", "% Hoy", "% 3M", "STR", "MOM", "POS"]
         
         edit_df = st.data_editor(df, hide_index=True, column_order=v_cols, column_config=conf,
                                  disabled=[c for c in v_cols if c != "Ver"], height=550)
@@ -507,54 +485,23 @@ with tab_manual:
     
     ### 3. Asignación de Cuadrantes (POS)
     Dependiendo de dónde caigan las coordenadas X e Y (restando 100 para centrar el eje en el origen 0,0), el activo se clasifica en una de las cuatro fases del ciclo:
-    * **Leading (Líder):** $X \ge 0$ y $Y \ge 0$ (Fuerte y ganando inercia).
-    * **Weakening (Debilitándose):** $X \ge 0$ y $Y < 0$ (Fuerte pero perdiendo inercia).
-    * **Lagging (Rezagado):** $X < 0$ y $Y < 0$ (Débil y perdiendo inercia).
-    * **Improving (Mejorando):** $X < 0$ y $Y \ge 0$ (Débil pero ganando inercia).
+    * 🟢 **Leading (Líder):** $X \ge 0$ y $Y \ge 0$ (Fuerte y ganando inercia).
+    * 🔵 **Improving (Mejorando):** $X < 0$ y $Y \ge 0$ (Débil pero ganando inercia).
+    * 🟡 **Weakening (Debilitándose):** $X \ge 0$ y $Y < 0$ (Fuerte pero perdiendo inercia).
+    * 🔴 **Lagging (Rezagado):** $X < 0$ y $Y < 0$ (Débil y perdiendo inercia).
     
     ---
     
-    ### 4. Puntuación 1: Posición Óptima (P-Pos)
-    No nos conformamos con que un activo esté en el cuadrante verde (Leading); queremos premiar a los que están más arriba y a la derecha. Definimos un **punto ideal teórico** en las coordenadas matemáticas (140, 140).
-    Se calcula la distancia euclidiana ($d$) del activo actual a ese punto ideal:
-    $$d=\sqrt{(140-X_{RRG})^2+(140-Y_{RRG})^2}$$
-    **Importante:** La nota no es absoluta, sino **relativa al universo de activos analizado** en la sesión. El sistema busca qué activo está más cerca (distancia mínima) y cuál está más lejos (distancia máxima). Al activo con la menor distancia relativa se le asigna un 10, al de mayor distancia un 0, y el resto se interpola linealmente entre ambos extremos.
+    ### 4. Puntuación Definitiva (Score)
+    El algoritmo valora de forma positiva la magnitud de la rotación. Para ello, el programa calcula el *Score* basado estrictamente en la **distancia euclídea** desde el eje de coordenadas $(0,0)$ hasta la posición del activo en el momento actual (el punto más reciente de la "cola").
     
-    ---
+    $$Score=\sqrt{X^2+Y^2}$$
     
-    ### 5. Puntuación 2: Ángulo de Ataque (P-Ang)
-    Queremos comprar activos cuya "cola" en el gráfico apunte en la dirección correcta: hacia arriba y a la derecha (45 grados).
-    Se toman los últimos **__TAIL_LENGTH__ puntos** del RRG del activo en intervalos de 5 días. Se aplica una regresión lineal sobre los ejes del tiempo para ver cómo avanzan la $X$ y la $Y$.
-    Calculamos el ángulo de esa trayectoria:
-    $$\theta=\arctan\left(\frac{Pendiente_Y}{Pendiente_X}\right)$$
-    El ángulo ideal es 45° (crecimiento constante y equilibrado de Fuerza y Momentum). Calculamos la diferencia absoluta entre el ángulo real y esos 45°. 
-    **Importante:** La penalización es simétrica. Esto significa que un activo con una trayectoria excesivamente vertical (ej. 90°, ganando inercia pero sin avanzar en tendencia) se penaliza exactamente igual que uno con una trayectoria demasiado plana (ej. 0°, ganando tendencia pero sin ganar inercia). Cualquier desviación de la diagonal perfecta resta puntos proporcionalmente, proyectando una nota final de 0 a 10 (donde apuntar exactamente a 45° da un 10).
-    
-    ---
-    
-    ### 6. Puntuación 3: Linealidad del Precio (P-R2)
-    Queremos activos con subidas limpias, sin sobresaltos. Tomamos los **precios de cierre reales de los últimos 63 días** (3 meses).
-    Se traza una línea de tendencia ideal (regresión lineal) sobre esos precios y se calcula el coeficiente de determinación ($R^2$), que mide cuánto se ajusta el precio real a esa línea perfecta.
-    $$R^2=1-\frac{\sum(Precio_{Real}-Precio_{Teorico})^2}{\sum(Precio_{Real}-Media_{Precio})^2}$$
-    El resultado (que va de 0 a 1) se multiplica por 10 para obtener una nota sobre 10.
-    
-    ---
-    
-    ### 7. Nota Definitiva (Score)
-    Por último, el programa pondera las tres notas anteriores según la configuración actual:
-    * **__WEIGHT_POS__%** Peso a la Posición en el gráfico (P-Pos).
-    * **__WEIGHT_ANG__%** Peso al Ángulo de ataque (P-Ang).
-    * **__WEIGHT_R2__%** Peso a la Linealidad del precio (P-R2).
-    
-    $$Score=(P_{Pos}\times \frac{__WEIGHT_POS__}{100})+(P_{Ang}\times \frac{__WEIGHT_ANG__}{100})+(P_{R^2}\times \frac{__WEIGHT_R2__}{100})$$
+    Cuanto mayor es la distancia respecto al origen, mayor es la fuerza del movimiento (ya sea liderando o rezagándose pronunciadamente). El algoritmo ordena la tabla final mostrando en primer lugar a los *Leading* con mayor amplitud, seguidos de los *Improving*, los *Weakening* y finalmente los *Lagging*.
     """
     
     manual_texto = manual_texto.replace("__RS_SMOOTH__", str(RS_SMOOTH))
     manual_texto = manual_texto.replace("__PERIODO_X__", str(PERIODO_X))
     manual_texto = manual_texto.replace("__PERIODO_Y__", str(PERIODO_Y))
-    manual_texto = manual_texto.replace("__TAIL_LENGTH__", str(TAIL_LENGTH))
-    manual_texto = manual_texto.replace("__WEIGHT_POS__", str(WEIGHT_POS))
-    manual_texto = manual_texto.replace("__WEIGHT_ANG__", str(WEIGHT_ANG))
-    manual_texto = manual_texto.replace("__WEIGHT_R2__", str(WEIGHT_R2))
     
     st.markdown(manual_texto)
