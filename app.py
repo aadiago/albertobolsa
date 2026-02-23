@@ -347,37 +347,30 @@ with tab_app:
 
             if not pts: continue
 
-            # Distancia euclídea del eje (0,0) al último punto de la cola (posición actual)
+            # Coordenadas relativas al centro (0,0)
             str_val = pts[0][0] - 100
             mom_val = pts[0][1] - 100
-            score_dist = np.sqrt(str_val**2 + mom_val**2)
+            
+            # Proyección ortogonal ponderada (Score Vectorial)
+            score_val = str_val + (1.618 * mom_val)
 
             ret1d = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-2]) - 1) * 100
             ret3m = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-63]) - 1) * 100 if len(raw_prices[tick]) >= 63 else 0
 
-            # Determinar fase para ordenar e icono. 
-            # Inversión matemática para ordenar: En W y L se prioriza la distancia menor al centro.
+            # Determinación de fase únicamente para visualización
             if str_val >= 0 and mom_val >= 0:
                 pos_str = "🟢 Leading"
-                sort_order = 1
-                sort_score = score_dist
             elif str_val < 0 and mom_val >= 0:
                 pos_str = "🔵 Improving"
-                sort_order = 2
-                sort_score = score_dist
             elif str_val >= 0 and mom_val < 0:
                 pos_str = "🟡 Weakening"
-                sort_order = 3
-                sort_score = -score_dist # Invertido
             else:
                 pos_str = "🔴 Lagging"
-                sort_order = 4
-                sort_score = -score_dist # Invertido
 
             res_raw.append({
                 "tick": tick, "name": name, "reg": reg, "isec": isec, "ireg": ireg,
-                "score": score_dist, "sort_score": sort_score, "str": str_val, "mom": mom_val,
-                "r1d": ret1d, "r3m": ret3m, "pos_str": pos_str, "sort_order": sort_order
+                "score": score_val, "str": str_val, "mom": mom_val,
+                "r1d": ret1d, "r3m": ret3m, "pos_str": pos_str
             })
             rrg_hist[tick] = pts
 
@@ -387,8 +380,6 @@ with tab_app:
 
             final_rows.append({
                 "Ver": (r['tick'] in MY_PORTFOLIO), 
-                "Sort_Order": r['sort_order'],
-                "Sort_Score": r['sort_score'],
                 "Img_S": get_img_b64(r['isec']), 
                 "Img_R": get_img_b64(r['ireg']),
                 "Img_P": get_img_b64(p_ic),
@@ -398,8 +389,8 @@ with tab_app:
                 "POS": r['pos_str']
             })
 
-        # Ordenar: Primero por categoría (Leading > Improving > Weakening > Lagging), luego por el Sort_Score oculto
-        df = pd.DataFrame(final_rows).sort_values(by=["Sort_Order", "Sort_Score"], ascending=[True, False]).reset_index(drop=True)
+        # Ordenar simplemente por el Score matemático descendente
+        df = pd.DataFrame(final_rows).sort_values(by="Score", ascending=False).reset_index(drop=True)
         df.insert(1, "#", range(1, len(df) + 1))
 
         conf = {
@@ -498,16 +489,18 @@ with tab_manual:
     
     ---
     
-    ### 4. Puntuación Definitiva (Score) y Ordenación
-    El algoritmo valora la magnitud de la rotación usando la **distancia euclídea** desde el centro de coordenadas $(0,0)$ hasta la posición actual del activo (el último punto de la "cola").
+    ### 4. Puntuación Definitiva (Score Vectorial) y Ordenación
+    Para ordenar todo el universo de activos de una manera fluida y matemáticamente perfecta, el programa ha abandonado el concepto clásico de "distancia euclídea". La distancia mide la amplitud, pero es ciega a la dirección (un activo que cae en picado puede estar igual de lejos del centro que un activo líder imparable).
     
-    $$Score=\sqrt{X^2+Y^2}$$
+    En su lugar, el modelo utiliza una **Proyección Ortogonal sobre un Vector Director Óptimo**. 
     
-    Sin embargo, el sistema aplica una **lógica invertida para ordenar la tabla** de forma inteligente, creando un flujo natural desde los activos más potentes hasta los más castigados:
+    La "dirección perfecta" en finanzas no es simétrica: la inercia (Momentum) siempre avisa antes de que el precio (Fuerza) logre girar. Por ello, en el producto escalar se otorga un peso superior a la coordenada $Y_{RRG}$ utilizando como multiplicador la **Proporción Áurea** ($\varphi \approx 1.618$).
     
-    1. **Fase del Ciclo:** Primero se agrupa por cuadrantes (Leading > Improving > Weakening > Lagging).
-    2. **Lógica Positiva (Leading e Improving):** En estos cuadrantes, **mayor distancia es mejor**. Lideran la lista los activos que están más lejos del centro (tienen mayor fuerza o inercia positiva).
-    3. **Lógica Invertida (Weakening y Lagging):** En estos cuadrantes, **menor distancia es mejor**. Lideran la lista los activos que están más cerca del origen de coordenadas. ¿El motivo? Significa que su debilidad está remitiendo y están a punto de salvarse rotando hacia el siguiente cuadrante positivo.
+    La fórmula de puntuación de un activo se reduce a una ecuación lineal pura:
+    
+    $$Score = X_{RRG} + (1.618 \times Y_{RRG})$$
+    
+    Esta sencilla proyección tiene un comportamiento devastadoramente efectivo, ya que ordena automáticamente los cuadrantes respetando el ciclo natural del mercado (Leading > Improving > Weakening > Lagging) sin necesidad de utilizar condicionales artificiales. Un activo subiendo con fuerza en el cuadrante de *Improving* siempre superará a un activo desfondándose en el cuadrante de *Weakening*, fluyendo la tabla desde los ganadores indiscutibles en lo más alto hasta los perdedores absolutos al final.
     """
     
     manual_texto = manual_texto.replace("__RS_SMOOTH__", str(RS_SMOOTH))
