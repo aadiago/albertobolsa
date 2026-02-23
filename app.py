@@ -14,8 +14,14 @@ import io
 DEF_RS_SMOOTH = 20
 DEF_PERIODO_X = 63
 DEF_PERIODO_Y = 21
-DEF_TAIL_LENGTH = 5  # Número de puntos en la cola (cada uno representa 5 días)
-DEF_MAX_ULCER = 3.0  # Límite de dolor (Ulcer Index)
+DEF_TAIL_LENGTH = 5  
+DEF_UI_PENALTY = 3.0
+DEF_VELOCITY_WEIGHT = 30.0
+
+# Nuevos parámetros progresivos
+DEF_VEL_EXP = 1.2
+DEF_UI_THRESHOLD = 2.5
+DEF_UI_EXP = 1.5
 
 # --- 2. CONFIGURACIÓN VISUAL ---
 st.set_page_config(layout="wide", page_title="PENGUIN PORTFOLIO PRO", page_icon="🐧")
@@ -270,13 +276,13 @@ def get_img_b64(filename):
             img = img.convert("RGBA")
             
             if filename.lower() == "eme.png":
-                img.thumbnail((24, 24), Image.Resampling.LANCZOS)
-                bg = Image.new("RGBA", (32, 32), (255, 255, 255, 0))
-                offset = ((32 - img.width) // 2, (32 - img.height) // 2)
+                img.thumbnail((96, 96), Image.Resampling.LANCZOS)
+                bg = Image.new("RGBA", (128, 128), (255, 255, 255, 0))
+                offset = ((128 - img.width) // 2, (128 - img.height) // 2)
                 bg.paste(img, offset)
                 img = bg
             else:
-                img.thumbnail((32, 32), Image.Resampling.LANCZOS)
+                img.thumbnail((128, 128), Image.Resampling.LANCZOS)
                 
             buf = io.BytesIO()
             img.save(buf, format="PNG")
@@ -318,8 +324,16 @@ with tab_params:
         with col2: PERIODO_X = st.number_input("Periodo Eje X (STR)", min_value=10, max_value=252, value=DEF_PERIODO_X, step=5)
         with col3: PERIODO_Y = st.number_input("Periodo Eje Y (MOM)", min_value=5, max_value=100, value=DEF_PERIODO_Y, step=1)
 
-        st.subheader("Filtros de Riesgo")
-        MAX_ULCER = st.number_input("Máximo Ulcer Index (Límite de Dolor)", min_value=0.0, max_value=50.0, value=DEF_MAX_ULCER, step=0.5)
+        st.subheader("Configuración del Score Unificado (Lineal)")
+        col4, col5 = st.columns(2)
+        with col4: UI_PENALTY = st.number_input("Multiplicador Penalización UI", min_value=0.0, max_value=10.0, value=DEF_UI_PENALTY, step=0.5)
+        with col5: VEL_WEIGHT = st.number_input("Bono por Velocidad (%)", min_value=0.0, max_value=100.0, value=DEF_VELOCITY_WEIGHT, step=5.0)
+
+        st.subheader("Configuración Progresiva (No Lineal)")
+        col6, col7, col8 = st.columns(3)
+        with col6: VEL_EXP = st.number_input("Exponente Velocidad (Sprints)", min_value=1.0, max_value=3.0, value=DEF_VEL_EXP, step=0.1)
+        with col7: UI_THRESHOLD = st.number_input("Umbral Ulcer Index (Riesgo)", min_value=0.5, max_value=10.0, value=DEF_UI_THRESHOLD, step=0.5)
+        with col8: UI_EXP = st.number_input("Exponente Penalización UI", min_value=1.0, max_value=3.0, value=DEF_UI_EXP, step=0.1)
 
         st.subheader("Gráfico")
         TAIL_LENGTH = st.number_input("Puntos de la cola (Saltos de 5 días)", min_value=3, max_value=20, value=DEF_TAIL_LENGTH, step=1)
@@ -355,22 +369,36 @@ with tab_app:
             str_val = pts[0][0] - 100
             mom_val = pts[0][1] - 100
             
-            # Proyección ortogonal ponderada (Score Vectorial)
-            score_val = str_val + (1.618 * mom_val)
-
-            ret1d = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-2]) - 1) * 100
-            ret3m = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-63]) - 1) * 100 if len(raw_prices[tick]) >= 63 else 0
+            # --- Cálculo de Velocidad ---
+            velocity = 0.0
+            if len(pts) > 1:
+                # Distancia entre la cabeza actual y el punto de hace 5 días
+                velocity = np.sqrt((pts[0][0] - pts[1][0])**2 + (pts[0][1] - pts[1][1])**2)
 
             # --- Cálculo del Índice Ulcer ---
             prices_x = raw_prices[tick].dropna().tail(PERIODO_X)
+            ulcer_index = 0.0
             if len(prices_x) > 1:
                 roll_max = prices_x.cummax()
                 drawdowns = ((prices_x - roll_max) / roll_max) * 100
                 ulcer_index = np.sqrt(np.mean(drawdowns**2))
-            else:
-                ulcer_index = 0.0
+
+            # --- SCORE MAESTRO UNIFICADO (PROGRESIVO) ---
+            base_score = str_val + (1.618 * mom_val)
             
-            ui_alert = "❌" if ulcer_index > MAX_ULCER else ""
+            # 1. Bono de velocidad progresivo
+            vel_bonus = (velocity ** VEL_EXP) * (VEL_WEIGHT / 100)
+            
+            # 2. Penalización de riesgo progresiva (umbral de estrés)
+            if ulcer_index <= UI_THRESHOLD:
+                ui_penalty = ulcer_index * UI_PENALTY
+            else:
+                ui_penalty = (ulcer_index ** UI_EXP) * UI_PENALTY
+            
+            final_score = base_score + vel_bonus - ui_penalty
+
+            ret1d = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-2]) - 1) * 100
+            ret3m = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-63]) - 1) * 100 if len(raw_prices[tick]) >= 63 else 0
 
             # Determinación de fase únicamente para visualización
             if str_val >= 0 and mom_val >= 0:
@@ -384,7 +412,7 @@ with tab_app:
 
             res_raw.append({
                 "tick": tick, "name": name, "reg": reg, "isec": isec, "ireg": ireg,
-                "score": score_val, "str": str_val, "mom": mom_val, "ulcer": ulcer_index, "ui_alert": ui_alert,
+                "score": final_score, "str": str_val, "mom": mom_val,
                 "r1d": ret1d, "r3m": ret3m, "pos_str": pos_str
             })
             rrg_hist[tick] = pts
@@ -398,14 +426,13 @@ with tab_app:
                 "Img_S": get_img_b64(r['isec']), 
                 "Img_R": get_img_b64(r['ireg']),
                 "Img_P": get_img_b64(p_ic),
-                "⚠️": r['ui_alert'],
-                "Ticker": r['tick'], "Nombre": r['name'], "Score": round(r['score'], 2), "UI": round(r['ulcer'], 2),
+                "Ticker": r['tick'], "Nombre": r['name'], "Score": round(r['score'], 2),
                 "STR": round(r['str'], 2), "MOM": round(r['mom'], 2),
                 "% Hoy": round(r['r1d'], 2), "% 3M": round(r['r3m'], 2),
                 "POS": r['pos_str']
             })
 
-        # Ordenar simplemente por el Score matemático descendente
+        # Ordenar puramente por el Score Maestro Unificado descendente
         df = pd.DataFrame(final_rows).sort_values(by="Score", ascending=False).reset_index(drop=True)
         df.insert(1, "#", range(1, len(df) + 1))
 
@@ -414,14 +441,12 @@ with tab_app:
             "Img_S": st.column_config.ImageColumn("Sec", width="small"),
             "Img_R": st.column_config.ImageColumn("Reg", width="small"), 
             "Img_P": st.column_config.ImageColumn("👤", width="small"),
-            "⚠️": st.column_config.TextColumn("⚠️", width="small"),
             "Nombre": st.column_config.TextColumn("Nombre", width=280),
-            "UI": st.column_config.NumberColumn("UI", format="%.2f"),
             "% Hoy": st.column_config.NumberColumn("% Hoy", format="%.2f%%"),
             "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%"),
         }
         
-        v_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "⚠️", "Ticker", "Nombre", "Score", "UI", "% Hoy", "% 3M", "STR", "MOM", "POS"]
+        v_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "Ticker", "Nombre", "Score", "% Hoy", "% 3M", "STR", "MOM", "POS"]
         
         edit_df = st.data_editor(df, hide_index=True, column_order=v_cols, column_config=conf,
                                  disabled=[c for c in v_cols if c != "Ver"], height=550)
@@ -507,27 +532,28 @@ with tab_manual:
     
     ---
     
-    ### 4. Gestión del Riesgo: Índice Ulcer (UI)
-    El RRG es un modelo ofensivo (busca rentabilidad) pero ignora el estrés del inversor. Para equilibrarlo, el programa calcula el Índice Ulcer, una métrica que penaliza estrictamente la profundidad y duración de las caídas (drawdowns) durante los últimos **__PERIODO_X__ periodos**.
+    ### 4. Puntuación Definitiva (SCORE MAESTRO UNIFICADO - NO LINEAL)
+    Para ofrecer una única nota definitiva que sirva para ordenar toda la cartera de forma impecable, el programa fusiona tres dimensiones críticas (Proyección Vectorial, Velocidad y Riesgo) en una sola ecuación progresiva:
     
-    $$UI=\sqrt{\frac{1}{N}\sum_{i=1}^{N}D_i^2}$$
-    *(Donde $D_i$ es el porcentaje de caída desde el máximo previo).*
+    $$Score = Base + Bono - Penalización$$
     
-    Cualquier activo cuyo Índice Ulcer supere el umbral configurado (__MAX_ULCER__ por defecto) es marcado en la tabla general con una alerta visual (❌), indicando que, independientemente de su fuerza relativa actual, ha sometido a sus inversores a una volatilidad a la baja excesiva recientemente.
-    
-    ---
-    
-    ### 5. Puntuación Definitiva (Score Vectorial) y Ordenación
-    Para ordenar todo el universo de activos, el modelo utiliza una **Proyección Ortogonal sobre un Vector Director Óptimo**. La "dirección perfecta" otorga un peso superior a la inercia (Momentum) sobre la tendencia (Fuerza) utilizando la Proporción Áurea ($\varphi \approx 1.618$).
-    
-    $$Score=X_{RRG}+(1.618\times Y_{RRG})$$
-    
-    Esta ecuación alinea automáticamente los cuadrantes respetando el ciclo natural (Leading > Improving > Weakening > Lagging) para que los activos más fuertes y con mejor inercia destaquen en la cima de la tabla.
+    1. **La Base Vectorial:** Proyección ortogonal que otorga mayor peso al Momentum utilizando la Proporción Áurea ($\varphi \approx 1.618$). Ordena automáticamente el ciclo (Leading > Improving > Weakening > Lagging).
+       $$Base = X_{RRG} + 1.618 \times Y_{RRG}$$
+       
+    2. **El Bono de Velocidad (Progresivo):** Si el activo está acelerando (midiendo la distancia recorrida en el gráfico), se potencia con el exponente **__DEF_VEL_EXP__** y se suma el **__DEF_VELOCITY_WEIGHT__%** de ese valor para premiar los "sprints" bruscos.
+       $$Bono = Velocidad^{__DEF_VEL_EXP__} \times \left(\frac{\text{Bono \%}}{100}\right)$$
+       
+    3. **La Penalización de Riesgo (No Lineal):** Se calcula el Índice Ulcer ($UI$) midiendo las caídas de los últimos __PERIODO_X__ periodos. Si el $UI$ es $\le$ **__DEF_UI_THRESHOLD__**, se aplica el castigo lineal (**__DEF_UI_PENALTY__**). Si supera ese umbral de estrés, se aplica un castigo exponencial elevado a **__DEF_UI_EXP__**.
+       $$\text{Penalización} = \begin{cases} UI \times \text{Penalización Lineal} & \text{si } UI \le __DEF_UI_THRESHOLD__ \\ UI^{__DEF_UI_EXP__} \times \text{Penalización Lineal} & \text{si } UI > __DEF_UI_THRESHOLD__ \end{cases}$$
     """
     
     manual_texto = manual_texto.replace("__RS_SMOOTH__", str(RS_SMOOTH))
     manual_texto = manual_texto.replace("__PERIODO_X__", str(PERIODO_X))
     manual_texto = manual_texto.replace("__PERIODO_Y__", str(PERIODO_Y))
-    manual_texto = manual_texto.replace("__MAX_ULCER__", str(MAX_ULCER))
+    manual_texto = manual_texto.replace("__DEF_UI_PENALTY__", str(UI_PENALTY))
+    manual_texto = manual_texto.replace("__DEF_VELOCITY_WEIGHT__", str(VEL_WEIGHT))
+    manual_texto = manual_texto.replace("__DEF_VEL_EXP__", str(VEL_EXP))
+    manual_texto = manual_texto.replace("__DEF_UI_THRESHOLD__", str(UI_THRESHOLD))
+    manual_texto = manual_texto.replace("__DEF_UI_EXP__", str(UI_EXP))
     
     st.markdown(manual_texto)
