@@ -26,7 +26,6 @@ st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:italic,wght@400;700&display=swap');
     
-    /* Solo reducimos el espacio inferior para no pisar la cabecera móvil de Streamlit */
     .block-container {
         padding-bottom: 1rem !important;
     }
@@ -34,7 +33,7 @@ st.markdown("""
         font-size: 1.4rem;
         font-weight: bold;
         margin-bottom: 0px;
-        margin-top: -2rem; /* Subimos el título para ganar espacio de forma segura en móvil */
+        margin-top: -2rem;
         color: #1E1E1E;
         line-height: 1.1;
     }
@@ -61,31 +60,7 @@ with col_h2:
     st.markdown('<p class="main-title">PENGUIN PORTFOLIO</p>', unsafe_allow_html=True)
     st.markdown('<p class="alberto-sofia">Sofía y Alberto 2026</p>', unsafe_allow_html=True)
 
-# --- 4. PARÁMETROS CONFIGURABLES (SIDEBAR Y FORMULARIO) ---
-st.sidebar.header("⚙️ PARÁMETROS DEL MODELO")
-
-# El formulario congela los cambios hasta pulsar el botón
-with st.sidebar.form("parametros_form"):
-    st.subheader("Pesos del Score (%)")
-    WEIGHT_POS = st.number_input("Peso Posición", min_value=0.0, max_value=100.0, value=DEF_WEIGHT_POS, step=5.0)
-    WEIGHT_ANG = st.number_input("Peso Ángulo", min_value=0.0, max_value=100.0, value=DEF_WEIGHT_ANG, step=5.0)
-    WEIGHT_R2 = st.number_input("Peso R2", min_value=0.0, max_value=100.0, value=DEF_WEIGHT_R2, step=5.0)
-
-    st.subheader("Motor RRG")
-    RS_SMOOTH = st.number_input("Suavizado del RS (Periodos)", min_value=1, max_value=100, value=DEF_RS_SMOOTH, step=1)
-    PERIODO_X = st.number_input("Periodo Eje X (STR)", min_value=10, max_value=252, value=DEF_PERIODO_X, step=5)
-    PERIODO_Y = st.number_input("Periodo Eje Y (MOM)", min_value=5, max_value=100, value=DEF_PERIODO_Y, step=1)
-
-    st.subheader("Gráfico")
-    TAIL_LENGTH = st.number_input("Puntos de la cola (Saltos de 5 días)", min_value=3, max_value=20, value=DEF_TAIL_LENGTH, step=1)
-
-    submit_button = st.form_submit_button("Actualizar Parámetros")
-
-WP = WEIGHT_POS / 100
-WA = WEIGHT_ANG / 100
-WR = WEIGHT_R2 / 100
-
-# --- 5. CONSTANTES Y ASSETS ---
+# --- 4. CONSTANTES Y ASSETS ---
 BENCHMARK = "MWEQ.DE"
 MY_PORTFOLIO = ["LCUJ.DE", "B41J.DE", "XDWI.DE", "SW2CHB.SW", "XDWM.DE", "LBRA.DE"]
 PIRANHA_ETFS = ["SXR8.DE", "XDEW.DE", "XDEE.DE", "IBCF.DE"]
@@ -271,7 +246,7 @@ ASSETS = [
     ("WEB 3.0", "WRL", "M37R.DE", "THEMATIC.PNG", "WRL.PNG")
 ]
 
-# --- 6. SERVICIOS ---
+# --- 5. SERVICIOS ---
 _img_cache = {}
 TRANSPARENT_1X1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
 
@@ -333,8 +308,32 @@ def load_data_robust(tickers):
         all_data.append(data)
     return pd.concat(all_data, axis=1)
 
-# --- 7. PESTAÑAS Y FLUJO PRINCIPAL ---
-tab_app, tab_manual = st.tabs(["📊 PORTFOLIO", "📖 MANUAL TÉCNICO"])
+# --- 6. PESTAÑAS Y FLUJO PRINCIPAL ---
+tab_app, tab_params, tab_manual = st.tabs(["📊 PORTFOLIO", "⚙️ PARÁMETROS", "📖 MANUAL TÉCNICO"])
+
+with tab_params:
+    st.markdown("### Configuración del Motor RRG")
+    with st.form("parametros_form"):
+        st.subheader("Pesos del Score (%)")
+        col1, col2, col3 = st.columns(3)
+        with col1: WEIGHT_POS = st.number_input("Peso Posición", min_value=0.0, max_value=100.0, value=DEF_WEIGHT_POS, step=5.0)
+        with col2: WEIGHT_ANG = st.number_input("Peso Ángulo", min_value=0.0, max_value=100.0, value=DEF_WEIGHT_ANG, step=5.0)
+        with col3: WEIGHT_R2 = st.number_input("Peso R2", min_value=0.0, max_value=100.0, value=DEF_WEIGHT_R2, step=5.0)
+
+        st.subheader("Sensibilidad del Modelo")
+        col4, col5, col6 = st.columns(3)
+        with col4: RS_SMOOTH = st.number_input("Suavizado RS (Periodos)", min_value=1, max_value=100, value=DEF_RS_SMOOTH, step=1)
+        with col5: PERIODO_X = st.number_input("Periodo Eje X (STR)", min_value=10, max_value=252, value=DEF_PERIODO_X, step=5)
+        with col6: PERIODO_Y = st.number_input("Periodo Eje Y (MOM)", min_value=5, max_value=100, value=DEF_PERIODO_Y, step=1)
+
+        st.subheader("Gráfico")
+        TAIL_LENGTH = st.number_input("Puntos de la cola (Saltos de 5 días)", min_value=3, max_value=20, value=DEF_TAIL_LENGTH, step=1)
+
+        submit_button = st.form_submit_button("Actualizar Parámetros", use_container_width=True)
+
+WP = WEIGHT_POS / 100
+WA = WEIGHT_ANG / 100
+WR = WEIGHT_R2 / 100
 
 with tab_app:
     t_list = list(set([a[2] for a in ASSETS] + [BENCHMARK]))
@@ -354,7 +353,6 @@ with tab_app:
             if r_ser.isna().all() or len(r_ser) < 30: continue
 
             pts = []
-            # Cola dinámica según el parámetro del formulario
             for d in range(0, TAIL_LENGTH * 5, 5):
                 idx = -(d + 1)
                 if abs(idx) <= len(r_ser):
@@ -364,7 +362,6 @@ with tab_app:
 
             d_curr = np.sqrt((140 - pts[0][0]) ** 2 + (140 - pts[0][1]) ** 2)
             
-            # Cálculo del ángulo ajustado dinámicamente al tamaño de la cola
             t_ax = np.arange(1, len(pts) + 1)
             xv, yv = np.array([p[0] for p in pts][::-1]), np.array([p[1] for p in pts][::-1])
             sx, _ = np.polyfit(t_ax, xv, 1); sy, _ = np.polyfit(t_ax, yv, 1)
@@ -431,7 +428,6 @@ with tab_app:
             "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%"),
         }
         
-        # Columnas reordenadas (% Hoy y % 3M a la derecha de Score)
         v_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "Ticker", "Nombre", "Score", "% Hoy", "% 3M", "P-Pos", "P-Ang", "P-R2", "STR", "MOM", "POS"]
         
         edit_df = st.data_editor(df, hide_index=True, column_order=v_cols, column_config=conf,
@@ -457,7 +453,6 @@ with tab_app:
                     dot_color = line.get_color()
 
                 if dot_color:
-                    # Tamaño fijo de puntos, heredando el color de la línea
                     ax.scatter(xs[:-1], ys[:-1], s=25, color=dot_color, alpha=0.4)
                     ax.scatter(xs[-1], ys[-1], s=160, color=dot_color, edgecolors='white', linewidth=1.5, zorder=5)
                 else:
