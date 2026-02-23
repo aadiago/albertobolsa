@@ -15,6 +15,7 @@ DEF_RS_SMOOTH = 20
 DEF_PERIODO_X = 63
 DEF_PERIODO_Y = 21
 DEF_TAIL_LENGTH = 5  # Número de puntos en la cola (cada uno representa 5 días)
+DEF_MAX_ULCER = 3.0  # Límite de dolor (Ulcer Index)
 
 # --- 2. CONFIGURACIÓN VISUAL ---
 st.set_page_config(layout="wide", page_title="PENGUIN PORTFOLIO PRO", page_icon="🐧")
@@ -317,6 +318,9 @@ with tab_params:
         with col2: PERIODO_X = st.number_input("Periodo Eje X (STR)", min_value=10, max_value=252, value=DEF_PERIODO_X, step=5)
         with col3: PERIODO_Y = st.number_input("Periodo Eje Y (MOM)", min_value=5, max_value=100, value=DEF_PERIODO_Y, step=1)
 
+        st.subheader("Filtros de Riesgo")
+        MAX_ULCER = st.number_input("Máximo Ulcer Index (Límite de Dolor)", min_value=0.0, max_value=50.0, value=DEF_MAX_ULCER, step=0.5)
+
         st.subheader("Gráfico")
         TAIL_LENGTH = st.number_input("Puntos de la cola (Saltos de 5 días)", min_value=3, max_value=20, value=DEF_TAIL_LENGTH, step=1)
 
@@ -357,6 +361,17 @@ with tab_app:
             ret1d = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-2]) - 1) * 100
             ret3m = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-63]) - 1) * 100 if len(raw_prices[tick]) >= 63 else 0
 
+            # --- Cálculo del Índice Ulcer ---
+            prices_x = raw_prices[tick].dropna().tail(PERIODO_X)
+            if len(prices_x) > 1:
+                roll_max = prices_x.cummax()
+                drawdowns = ((prices_x - roll_max) / roll_max) * 100
+                ulcer_index = np.sqrt(np.mean(drawdowns**2))
+            else:
+                ulcer_index = 0.0
+            
+            ui_alert = "❌" if ulcer_index > MAX_ULCER else ""
+
             # Determinación de fase únicamente para visualización
             if str_val >= 0 and mom_val >= 0:
                 pos_str = "🟢 Leading"
@@ -369,7 +384,7 @@ with tab_app:
 
             res_raw.append({
                 "tick": tick, "name": name, "reg": reg, "isec": isec, "ireg": ireg,
-                "score": score_val, "str": str_val, "mom": mom_val,
+                "score": score_val, "str": str_val, "mom": mom_val, "ulcer": ulcer_index, "ui_alert": ui_alert,
                 "r1d": ret1d, "r3m": ret3m, "pos_str": pos_str
             })
             rrg_hist[tick] = pts
@@ -383,7 +398,8 @@ with tab_app:
                 "Img_S": get_img_b64(r['isec']), 
                 "Img_R": get_img_b64(r['ireg']),
                 "Img_P": get_img_b64(p_ic),
-                "Ticker": r['tick'], "Nombre": r['name'], "Score": round(r['score'], 2),
+                "⚠️": r['ui_alert'],
+                "Ticker": r['tick'], "Nombre": r['name'], "Score": round(r['score'], 2), "UI": round(r['ulcer'], 2),
                 "STR": round(r['str'], 2), "MOM": round(r['mom'], 2),
                 "% Hoy": round(r['r1d'], 2), "% 3M": round(r['r3m'], 2),
                 "POS": r['pos_str']
@@ -398,12 +414,14 @@ with tab_app:
             "Img_S": st.column_config.ImageColumn("Sec", width="small"),
             "Img_R": st.column_config.ImageColumn("Reg", width="small"), 
             "Img_P": st.column_config.ImageColumn("👤", width="small"),
+            "⚠️": st.column_config.TextColumn("⚠️", width="small"),
             "Nombre": st.column_config.TextColumn("Nombre", width=280),
+            "UI": st.column_config.NumberColumn("UI", format="%.2f"),
             "% Hoy": st.column_config.NumberColumn("% Hoy", format="%.2f%%"),
             "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%"),
         }
         
-        v_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "Ticker", "Nombre", "Score", "% Hoy", "% 3M", "STR", "MOM", "POS"]
+        v_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "⚠️", "Ticker", "Nombre", "Score", "UI", "% Hoy", "% 3M", "STR", "MOM", "POS"]
         
         edit_df = st.data_editor(df, hide_index=True, column_order=v_cols, column_config=conf,
                                  disabled=[c for c in v_cols if c != "Ver"], height=550)
@@ -489,22 +507,27 @@ with tab_manual:
     
     ---
     
-    ### 4. Puntuación Definitiva (Score Vectorial) y Ordenación
-    Para ordenar todo el universo de activos de una manera fluida y matemáticamente perfecta, el programa ha abandonado el concepto clásico de "distancia euclídea". La distancia mide la amplitud, pero es ciega a la dirección (un activo que cae en picado puede estar igual de lejos del centro que un activo líder imparable).
+    ### 4. Gestión del Riesgo: Índice Ulcer (UI)
+    El RRG es un modelo ofensivo (busca rentabilidad) pero ignora el estrés del inversor. Para equilibrarlo, el programa calcula el Índice Ulcer, una métrica que penaliza estrictamente la profundidad y duración de las caídas (drawdowns) durante los últimos **__PERIODO_X__ periodos**.
     
-    En su lugar, el modelo utiliza una **Proyección Ortogonal sobre un Vector Director Óptimo**. 
+    $$UI=\sqrt{\frac{1}{N}\sum_{i=1}^{N}D_i^2}$$
+    *(Donde $D_i$ es el porcentaje de caída desde el máximo previo).*
     
-    La "dirección perfecta" en finanzas no es simétrica: la inercia (Momentum) siempre avisa antes de que el precio (Fuerza) logre girar. Por ello, en el producto escalar se otorga un peso superior a la coordenada $Y_{RRG}$ utilizando como multiplicador la **Proporción Áurea** ($\varphi \approx 1.618$).
+    Cualquier activo cuyo Índice Ulcer supere el umbral configurado (__MAX_ULCER__ por defecto) es marcado en la tabla general con una alerta visual (❌), indicando que, independientemente de su fuerza relativa actual, ha sometido a sus inversores a una volatilidad a la baja excesiva recientemente.
     
-    La fórmula de puntuación de un activo se reduce a una ecuación lineal pura:
+    ---
     
-    $$Score = X_{RRG} + (1.618 \times Y_{RRG})$$
+    ### 5. Puntuación Definitiva (Score Vectorial) y Ordenación
+    Para ordenar todo el universo de activos, el modelo utiliza una **Proyección Ortogonal sobre un Vector Director Óptimo**. La "dirección perfecta" otorga un peso superior a la inercia (Momentum) sobre la tendencia (Fuerza) utilizando la Proporción Áurea ($\varphi \approx 1.618$).
     
-    Esta sencilla proyección tiene un comportamiento devastadoramente efectivo, ya que ordena automáticamente los cuadrantes respetando el ciclo natural del mercado (Leading > Improving > Weakening > Lagging) sin necesidad de utilizar condicionales artificiales. Un activo subiendo con fuerza en el cuadrante de *Improving* siempre superará a un activo desfondándose en el cuadrante de *Weakening*, fluyendo la tabla desde los ganadores indiscutibles en lo más alto hasta los perdedores absolutos al final.
+    $$Score=X_{RRG}+(1.618\times Y_{RRG})$$
+    
+    Esta ecuación alinea automáticamente los cuadrantes respetando el ciclo natural (Leading > Improving > Weakening > Lagging) para que los activos más fuertes y con mejor inercia destaquen en la cima de la tabla.
     """
     
     manual_texto = manual_texto.replace("__RS_SMOOTH__", str(RS_SMOOTH))
     manual_texto = manual_texto.replace("__PERIODO_X__", str(PERIODO_X))
     manual_texto = manual_texto.replace("__PERIODO_Y__", str(PERIODO_Y))
+    manual_texto = manual_texto.replace("__MAX_ULCER__", str(MAX_ULCER))
     
     st.markdown(manual_texto)
