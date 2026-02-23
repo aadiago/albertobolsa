@@ -10,16 +10,26 @@ import os
 from PIL import Image
 import io
 
-# --- 1. CONFIGURACIÓN ---
+# --- 1. PARÁMETROS POR DEFECTO DEL PROGRAMA ---
+# Agrupados aquí arriba para que sea muy fácil modificarlos en el futuro
+DEF_WEIGHT_POS = 60.0
+DEF_WEIGHT_ANG = 30.0
+DEF_WEIGHT_R2 = 10.0
+DEF_RS_SMOOTH = 20
+DEF_PERIODO_X = 100
+DEF_PERIODO_Y = 20
+DEF_TAIL_LENGTH = 5  # Número de puntos en la cola (cada uno representa 5 días)
+
+# --- 2. CONFIGURACIÓN VISUAL ---
 st.set_page_config(layout="wide", page_title="PENGUIN PORTFOLIO PRO", page_icon="🐧")
 
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:italic,wght@400;700&display=swap');
-    
-    /* Reducción drástica del espacio de la cabecera */
+
+    /* Reducción controlada del espacio de la cabecera (3rem respeta el menú móvil) */
     .block-container {
-        padding-top: 1rem !important;
+        padding-top: 3rem !important; 
         padding-bottom: 1rem !important;
     }
     .main-title {
@@ -42,38 +52,43 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. CABECERA COMPACTA ---
+# --- 3. CABECERA COMPACTA ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 col_h1, col_h2 = st.columns([1, 25])
 with col_h1:
     p_path = os.path.join(BASE_DIR, "pinguino.png")
     if os.path.exists(p_path): st.image(p_path, width=32)
-with col_h2: 
+with col_h2:
     st.markdown('<p class="main-title">PENGUIN PORTFOLIO</p>', unsafe_allow_html=True)
     st.markdown('<p class="alberto-sofia">Sofía y Alberto 2026</p>', unsafe_allow_html=True)
 
-# --- 3. PARÁMETROS CONFIGURABLES (SIDEBAR) ---
+# --- 4. PARÁMETROS CONFIGURABLES (SIDEBAR Y FORMULARIO) ---
 st.sidebar.header("⚙️ PARÁMETROS DEL MODELO")
 
-st.sidebar.subheader("Pesos del Score (%)")
-WEIGHT_POS = st.sidebar.number_input("Peso Posición", min_value=0.0, max_value=100.0, value=60.0, step=5.0)
-WEIGHT_ANG = st.sidebar.number_input("Peso Ángulo", min_value=0.0, max_value=100.0, value=30.0, step=5.0)
-WEIGHT_R2 = st.sidebar.number_input("Peso R2", min_value=0.0, max_value=100.0, value=10.0, step=5.0)
+with st.sidebar.form("parametros_form"):
+    st.subheader("Pesos del Score (%)")
+    WEIGHT_POS = st.number_input("Peso Posición", min_value=0.0, max_value=100.0, value=DEF_WEIGHT_POS, step=5.0)
+    WEIGHT_ANG = st.number_input("Peso Ángulo", min_value=0.0, max_value=100.0, value=DEF_WEIGHT_ANG, step=5.0)
+    WEIGHT_R2 = st.number_input("Peso R2", min_value=0.0, max_value=100.0, value=DEF_WEIGHT_R2, step=5.0)
 
-st.sidebar.subheader("Motor RRG")
-RS_SMOOTH = st.sidebar.number_input("Suavizado del RS (Periodos)", min_value=1, max_value=100, value=20, step=1)
-PERIODO_X = st.sidebar.number_input("Periodo Eje X (STR)", min_value=10, max_value=252, value=100, step=5)
-PERIODO_Y = st.sidebar.number_input("Periodo Eje Y (MOM)", min_value=5, max_value=100, value=20, step=1)
+    st.subheader("Motor RRG")
+    RS_SMOOTH = st.number_input("Suavizado del RS (Periodos)", min_value=1, max_value=100, value=DEF_RS_SMOOTH, step=1)
+    PERIODO_X = st.number_input("Periodo Eje X (STR)", min_value=10, max_value=252, value=DEF_PERIODO_X, step=5)
+    PERIODO_Y = st.number_input("Periodo Eje Y (MOM)", min_value=5, max_value=100, value=DEF_PERIODO_Y, step=1)
 
-st.sidebar.subheader("Gráfico")
-TAIL_DOT_SIZE = st.sidebar.number_input("Tamaño puntos de la cola", min_value=1, max_value=150, value=25, step=5)
+    st.subheader("Gráfico")
+    TAIL_LENGTH = st.number_input("Puntos de la cola (Saltos de 5 días)", min_value=3, max_value=20,
+                                  value=DEF_TAIL_LENGTH, step=1)
+
+    # El botón congela la ejecución hasta que el usuario decida actualizar
+    submit_button = st.form_submit_button("Actualizar Parámetros")
 
 WP = WEIGHT_POS / 100
 WA = WEIGHT_ANG / 100
 WR = WEIGHT_R2 / 100
 
-# --- 4. CONSTANTES Y ASSETS ---
+# --- 5. CONSTANTES Y ASSETS ---
 BENCHMARK = "MWEQ.DE"
 MY_PORTFOLIO = ["LCUJ.DE", "B41J.DE", "XDWI.DE", "SW2CHB.SW", "XDWM.DE", "LBRA.DE"]
 PIRANHA_ETFS = ["SXR8.DE", "XDEW.DE", "XDEE.DE", "IBCF.DE"]
@@ -259,14 +274,15 @@ ASSETS = [
     ("WEB 3.0", "WRL", "M37R.DE", "THEMATIC.PNG", "WRL.PNG")
 ]
 
-# --- 5. SERVICIOS ---
+# --- 6. SERVICIOS ---
 _img_cache = {}
 TRANSPARENT_1X1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+
 
 def get_img_b64(filename):
     if not filename: return TRANSPARENT_1X1
     if filename in _img_cache: return _img_cache[filename]
-    
+
     actual_filename = filename
     try:
         for f in os.listdir(BASE_DIR):
@@ -275,15 +291,15 @@ def get_img_b64(filename):
                 break
     except Exception:
         pass
-        
+
     path = os.path.join(BASE_DIR, actual_filename)
     if not os.path.exists(path):
-        return TRANSPARENT_1X1 
-        
+        return TRANSPARENT_1X1
+
     try:
         with Image.open(path) as img:
             img = img.convert("RGBA")
-            
+
             if filename.lower() == "eme.png":
                 img.thumbnail((24, 24), Image.Resampling.LANCZOS)
                 bg = Image.new("RGBA", (32, 32), (255, 255, 255, 0))
@@ -292,7 +308,7 @@ def get_img_b64(filename):
                 img = bg
             else:
                 img.thumbnail((32, 32), Image.Resampling.LANCZOS)
-                
+
             buf = io.BytesIO()
             img.save(buf, format="PNG")
             b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
@@ -301,7 +317,7 @@ def get_img_b64(filename):
     except:
         return TRANSPARENT_1X1
 
-# MODIFICADO: Ahora recibe los parámetros dinámicos
+
 def get_rrg_pts(ticker_df, bench_df, rs_smooth, periodo_x, periodo_y):
     rs = (ticker_df / bench_df) * 100
     rs_sm = rs.ewm(span=rs_smooth, adjust=False).mean()
@@ -311,6 +327,7 @@ def get_rrg_pts(ticker_df, bench_df, rs_smooth, periodo_x, periodo_y):
     m_s, s_s = rs_mom_raw.rolling(periodo_y).mean(), rs_mom_raw.rolling(periodo_y).std()
     rs_mom = ((rs_mom_raw - m_s) / s_s.replace(0, 1)) * 10 + 100
     return rs_ratio, rs_mom
+
 
 @st.cache_data(ttl=600)
 def load_data_robust(tickers):
@@ -322,7 +339,8 @@ def load_data_robust(tickers):
         all_data.append(data)
     return pd.concat(all_data, axis=1)
 
-# --- 6. PESTAÑAS Y FLUJO PRINCIPAL ---
+
+# --- 7. PESTAÑAS Y FLUJO PRINCIPAL ---
 tab_app, tab_manual = st.tabs(["📊 PORTFOLIO", "📖 MANUAL TÉCNICO"])
 
 with tab_app:
@@ -337,22 +355,27 @@ with tab_app:
 
         for name, reg, tick, isec, ireg in ASSETS:
             if tick not in raw_prices.columns: continue
-            
-            # MODIFICADO: Pasamos los parámetros de la sidebar a la función
+
             r_ser, m_ser = get_rrg_pts(raw_prices[tick], bench_p, RS_SMOOTH, PERIODO_X, PERIODO_Y)
-            
+
             if r_ser.isna().all() or len(r_ser) < 30: continue
 
             pts = []
-            for d in [0, 5, 10, 15, 20]:
+            # Cola dinámica según el parámetro del formulario
+            for d in range(0, TAIL_LENGTH * 5, 5):
                 idx = -(d + 1)
-                pts.append((float(r_ser.iloc[idx]), float(m_ser.iloc[idx])))
+                if abs(idx) <= len(r_ser):
+                    pts.append((float(r_ser.iloc[idx]), float(m_ser.iloc[idx])))
+
+            if not pts: continue
 
             d_curr = np.sqrt((140 - pts[0][0]) ** 2 + (140 - pts[0][1]) ** 2)
-            
-            t_ax = np.array([1, 2, 3, 4, 5])
+
+            # Cálculo del ángulo ajustado dinámicamente al tamaño de la cola
+            t_ax = np.arange(1, len(pts) + 1)
             xv, yv = np.array([p[0] for p in pts][::-1]), np.array([p[1] for p in pts][::-1])
-            sx, _ = np.polyfit(t_ax, xv, 1); sy, _ = np.polyfit(t_ax, yv, 1)
+            sx, _ = np.polyfit(t_ax, xv, 1);
+            sy, _ = np.polyfit(t_ax, yv, 1)
             angle = np.degrees(np.arctan2(sy, sx))
             diff = angle - 45
             if diff > 180: diff -= 360
@@ -372,7 +395,8 @@ with tab_app:
                 r2_sc = 0.0
 
             ret1d = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-2]) - 1) * 100
-            ret3m = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-63]) - 1) * 100 if len(raw_prices[tick]) >= 63 else 0
+            ret3m = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-63]) - 1) * 100 if len(
+                raw_prices[tick]) >= 63 else 0
 
             res_raw.append({
                 "tick": tick, "name": name, "reg": reg, "isec": isec, "ireg": ireg,
@@ -388,35 +412,37 @@ with tab_app:
         for r in res_raw:
             pos_sc = ((max_d - r['d_curr']) / (max_d - min_d)) * 10 if max_d != min_d else 5.0
             score = (pos_sc * WP) + (r['ang'] * WA) + (r['r2'] * WR)
-            
+
             p_ic = "pinguino.png" if r['tick'] in MY_PORTFOLIO else "PIRANHA.png" if r['tick'] in PIRANHA_ETFS else None
 
             final_rows.append({
-                "Ver": (r['tick'] in MY_PORTFOLIO), 
-                "Img_S": get_img_b64(r['isec']), 
+                "Ver": (r['tick'] in MY_PORTFOLIO),
+                "Img_S": get_img_b64(r['isec']),
                 "Img_R": get_img_b64(r['ireg']),
                 "Img_P": get_img_b64(p_ic),
                 "Ticker": r['tick'], "Nombre": r['name'], "Score": round(score, 2),
                 "P-Pos": round(pos_sc, 2), "P-Ang": round(r['ang'], 2), "P-R2": round(r['r2'], 2),
                 "STR": round(r['str'], 2), "MOM": round(r['mom'], 2),
                 "% Hoy": round(r['r1d'], 2), "% 3M": round(r['r3m'], 2),
-                "POS": "Leading" if r['str'] >= 0 and r['mom'] >= 0 else "Weakening" if r['str'] >= 0 and r['mom'] < 0 else "Lagging" if r['str'] < 0 and r['mom'] < 0 else "Improving"
+                "POS": "Leading" if r['str'] >= 0 and r['mom'] >= 0 else "Weakening" if r['str'] >= 0 and r[
+                    'mom'] < 0 else "Lagging" if r['str'] < 0 and r['mom'] < 0 else "Improving"
             })
 
         df = pd.DataFrame(final_rows).sort_values("Score", ascending=False).reset_index(drop=True)
         df.insert(1, "#", range(1, len(df) + 1))
 
         conf = {
-            "Ver": st.column_config.CheckboxColumn("Ver"), 
+            "Ver": st.column_config.CheckboxColumn("Ver"),
             "Img_S": st.column_config.ImageColumn("Sec", width="small"),
-            "Img_R": st.column_config.ImageColumn("Reg", width="small"), 
+            "Img_R": st.column_config.ImageColumn("Reg", width="small"),
             "Img_P": st.column_config.ImageColumn("👤", width="small"),
             "Nombre": st.column_config.TextColumn("Nombre", width=280),
             "% Hoy": st.column_config.NumberColumn("% Hoy", format="%.2f%%"),
             "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%"),
         }
-        v_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "Ticker", "Nombre", "Score", "P-Pos", "P-Ang", "P-R2", "STR", "MOM", "% Hoy", "% 3M", "POS"]
-        
+        v_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "Ticker", "Nombre", "Score", "P-Pos", "P-Ang", "P-R2", "STR",
+                  "MOM", "% Hoy", "% 3M", "POS"]
+
         edit_df = st.data_editor(df, hide_index=True, column_order=v_cols, column_config=conf,
                                  disabled=[c for c in v_cols if c != "Ver"], height=550)
 
@@ -429,24 +455,36 @@ with tab_app:
                 pts_raw = rrg_hist.get(t, [])
                 xs = np.array([p[0] - 100 for p in pts_raw][::-1])
                 ys = np.array([p[1] - 100 for p in pts_raw][::-1])
-                all_x.extend(xs); all_y.extend(ys)
+                all_x.extend(xs);
+                all_y.extend(ys)
+
+                dot_color = None
 
                 if len(xs) >= 3:
                     tr = np.arange(len(xs))
                     td = np.linspace(0, len(xs) - 1, 100)
-                    ax.plot(make_interp_spline(tr, xs, k=2)(td), make_interp_spline(tr, ys, k=2)(td), lw=1.5, alpha=0.7)
+                    line = ax.plot(make_interp_spline(tr, xs, k=2)(td), make_interp_spline(tr, ys, k=2)(td), lw=1.5,
+                                   alpha=0.7)[0]
+                    dot_color = line.get_color()
 
-                # MODIFICADO: Usamos el parámetro de tamaño para los puntos de la cola
-                ax.scatter(xs[:-1], ys[:-1], s=TAIL_DOT_SIZE, alpha=0.4)
-                ax.scatter(xs[-1], ys[-1], s=160, edgecolors='white', linewidth=1.5, zorder=5)
+                if dot_color:
+                    # Tamaño fijo de puntos (25), pero heredando el color de la línea
+                    ax.scatter(xs[:-1], ys[:-1], s=25, color=dot_color, alpha=0.4)
+                    ax.scatter(xs[-1], ys[-1], s=160, color=dot_color, edgecolors='white', linewidth=1.5, zorder=5)
+                else:
+                    sc = ax.scatter(xs[:-1], ys[:-1], s=25, alpha=0.4)
+                    dot_color = sc.get_facecolors()[0]
+                    ax.scatter(xs[-1], ys[-1], s=160, color=dot_color, edgecolors='white', linewidth=1.5, zorder=5)
+
                 ax.text(xs[-1], ys[-1], f"  {t}", fontsize=9, fontweight='bold', va='center')
 
             ax.axhline(0, c='#CCCCCC', lw=1, zorder=1)
             ax.axvline(0, c='#CCCCCC', lw=1, zorder=1)
-            
+
             limit = max([abs(val) for val in all_x + all_y] + [10]) * 1.3
-            ax.set_xlim(-limit, limit); ax.set_ylim(-limit, limit)
-            
+            ax.set_xlim(-limit, limit);
+            ax.set_ylim(-limit, limit)
+
             ax.add_patch(Rectangle((0, 0), limit, limit, color='green', alpha=0.04))
             ax.add_patch(Rectangle((-limit, 0), limit, limit, color='blue', alpha=0.04))
             ax.add_patch(Rectangle((-limit, -limit), limit, limit, color='red', alpha=0.04))
@@ -455,85 +493,85 @@ with tab_app:
             st.pyplot(fig)
 
 with tab_manual:
-    # MODIFICADO: Sustituimos dinámicamente los valores en el texto del manual para que reflejen la configuración actual
     manual_texto = r"""
     ## MANUAL TÉCNICO: MOTOR DE CÁLCULO PENGUIN PORTFOLIO PRO
-    
+
     ### 1. Obtención de Datos Base
     El proceso arranca descargando los precios de cierre ajustados (`Close`) de los últimos 2 años para todos los activos de la lista y para el índice de referencia o *benchmark* (en este caso, `MWEQ.DE`, el MSCI World Equal Weight).
-    
+
     ---
-    
+
     ### 2. El Corazón del Sistema: Coordenadas RRG
-    
+
     Para saber si un activo está liderando o rezagado respecto al mundo, no miramos su precio aislado, sino su comportamiento relativo usando la metodología de los *Relative Rotation Graphs* (RRG). Generamos dos coordenadas: **Fuerza (X)** y **Momentum (Y)**.
-    
+
     * **Paso A: Fuerza Relativa Básica (RS)**
         Se divide el precio del activo entre el precio del benchmark.
         $$RS=\left(\frac{Precio_{Activo}}{Precio_{Benchmark}}\right)\times 100$$
-        
+
     * **Paso B: Suavizado**
         Para evitar el "ruido" diario, se aplica una Media Móvil Exponencial (EMA) de **__RS_SMOOTH__ periodos** a la serie $RS$, obteniendo el $RS_{sm}$.
-    
+
     * **Paso C: Coordenada X (JdK RS-Ratio / STR)**
         Mide la tendencia a largo plazo del activo frente al benchmark. Se normaliza el $RS_{sm}$ usando su media ($\mu$) y desviación estándar ($\sigma$) de los **últimos __PERIODO_X__ periodos**. Se centra en 100.
         $$X_{RRG}=\left(\frac{RS_{sm}-\mu_{__PERIODO_X__}}{\sigma_{__PERIODO_X__}}\right)\times 10+100$$
-    
+
     * **Paso D: Coordenada Y (JdK RS-Momentum / MOM)**
         Mide la velocidad a la que cambia la fuerza relativa (la inercia a corto plazo). Se calcula la tasa de cambio porcentual a **__PERIODO_Y__ periodos** del $RS_{sm}$, y se vuelve a normalizar estadísticamente (media y desviación a **__PERIODO_Y__ días**).
         $$Y_{RRG}=\left(\frac{\Delta\%RS_{sm}-\mu_{__PERIODO_Y__}}{\sigma_{__PERIODO_Y__}}\right)\times 10+100$$
-    
+
     ---
-    
+
     ### 3. Asignación de Cuadrantes (POS)
     Dependiendo de dónde caigan las coordenadas X e Y (restando 100 para centrar el eje en el origen 0,0), el activo se clasifica en una de las cuatro fases del ciclo:
     * **Leading (Líder):** $X \ge 0$ y $Y \ge 0$ (Fuerte y ganando inercia).
     * **Weakening (Debilitándose):** $X \ge 0$ y $Y < 0$ (Fuerte pero perdiendo inercia).
     * **Lagging (Rezagado):** $X < 0$ y $Y < 0$ (Débil y perdiendo inercia).
     * **Improving (Mejorando):** $X < 0$ y $Y \ge 0$ (Débil pero ganando inercia).
-    
+
     ---
-    
+
     ### 4. Puntuación 1: Posición Óptima (P-Pos)
-    No nos conformamos con que un activo esté en el cuadrante verde (Leading); queremos premiar a los que están más arriba y a la derecha. Definimos un **punto ideal teórico** en las coordenadas (140, 140).
+    No nos conformamos con que un activo esté en el cuadrante verde (Leading); queremos premiar a los que están más arriba y a la derecha. Definimos un **punto ideal teórico** en las coordenadas matemáticas (140, 140).
     Se calcula la distancia euclidiana ($d$) del activo actual a ese punto ideal:
     $$d=\sqrt{(140-X_{RRG})^2+(140-Y_{RRG})^2}$$
-    Esta distancia se invierte y se escala de 0 a 10. El activo más cercano al punto ideal obtiene un 10; el más lejano, un 0.
-    
+    **Importante:** La nota no es absoluta, sino **relativa al universo de activos analizado** en la sesión. El sistema busca qué activo está más cerca (distancia mínima) y cuál está más lejos (distancia máxima). Al activo con la menor distancia relativa se le asigna un 10, al de mayor distancia un 0, y el resto se interpola linealmente entre ambos extremos.
+
     ---
-    
+
     ### 5. Puntuación 2: Ángulo de Ataque (P-Ang)
     Queremos comprar activos cuya "cola" en el gráfico apunte en la dirección correcta: hacia arriba y a la derecha (45 grados).
-    Se toman los últimos 5 puntos del RRG del activo en intervalos de 5 días (es decir, la ruta de las últimas 3 semanas). Se aplica una regresión lineal sobre los ejes del tiempo para ver cómo avanzan la $X$ y la $Y$.
+    Se toman los últimos **__TAIL_LENGTH__ puntos** del RRG del activo en intervalos de 5 días. Se aplica una regresión lineal sobre los ejes del tiempo para ver cómo avanzan la $X$ y la $Y$.
     Calculamos el ángulo de esa trayectoria:
     $$\theta=\arctan\left(\frac{Pendiente_Y}{Pendiente_X}\right)$$
-    El ángulo ideal es 45°. Calculamos la diferencia entre el ángulo real y 45°. Se penalizan las desviaciones y se proyecta en una nota de 0 a 10 (donde apuntar exactamente a 45° da un 10).
-    
+    El ángulo ideal es 45° (crecimiento constante y equilibrado de Fuerza y Momentum). Calculamos la diferencia absoluta entre el ángulo real y esos 45°. 
+    **Importante:** La penalización es simétrica. Esto significa que un activo con una trayectoria excesivamente vertical (ej. 90°, ganando inercia pero sin avanzar en tendencia) se penaliza exactamente igual que uno con una trayectoria demasiado plana (ej. 0°, ganando tendencia pero sin ganar inercia). Cualquier desviación de la diagonal perfecta resta puntos proporcionalmente, proyectando una nota final de 0 a 10 (donde apuntar exactamente a 45° da un 10).
+
     ---
-    
+
     ### 6. Puntuación 3: Linealidad del Precio (P-R2)
     Queremos activos con subidas limpias, sin sobresaltos. Tomamos los **precios de cierre reales de los últimos 63 días** (3 meses).
     Se traza una línea de tendencia ideal (regresión lineal) sobre esos precios y se calcula el coeficiente de determinación ($R^2$), que mide cuánto se ajusta el precio real a esa línea perfecta.
     $$R^2=1-\frac{\sum(Precio_{Real}-Precio_{Teorico})^2}{\sum(Precio_{Real}-Media_{Precio})^2}$$
     El resultado (que va de 0 a 1) se multiplica por 10 para obtener una nota sobre 10.
-    
+
     ---
-    
+
     ### 7. Nota Definitiva (Score)
     Por último, el programa pondera las tres notas anteriores según la configuración actual:
     * **__WEIGHT_POS__%** Peso a la Posición en el gráfico (P-Pos).
     * **__WEIGHT_ANG__%** Peso al Ángulo de ataque (P-Ang).
     * **__WEIGHT_R2__%** Peso a la Linealidad del precio (P-R2).
-    
+
     $$Score=(P_{Pos}\times \frac{__WEIGHT_POS__}{100})+(P_{Ang}\times \frac{__WEIGHT_ANG__}{100})+(P_{R^2}\times \frac{__WEIGHT_R2__}{100})$$
     """
-    
-    # Reemplazamos los marcadores por los valores en tiempo real
+
     manual_texto = manual_texto.replace("__RS_SMOOTH__", str(RS_SMOOTH))
     manual_texto = manual_texto.replace("__PERIODO_X__", str(PERIODO_X))
     manual_texto = manual_texto.replace("__PERIODO_Y__", str(PERIODO_Y))
+    manual_texto = manual_texto.replace("__TAIL_LENGTH__", str(TAIL_LENGTH))
     manual_texto = manual_texto.replace("__WEIGHT_POS__", str(WEIGHT_POS))
     manual_texto = manual_texto.replace("__WEIGHT_ANG__", str(WEIGHT_ANG))
     manual_texto = manual_texto.replace("__WEIGHT_R2__", str(WEIGHT_R2))
-    
+
     st.markdown(manual_texto)
