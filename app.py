@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import numpy as np
+import matplotlib.subplots as plt
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from scipy.interpolate import make_interp_spline
@@ -355,23 +356,28 @@ with tab_app:
             ret1d = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-2]) - 1) * 100
             ret3m = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-63]) - 1) * 100 if len(raw_prices[tick]) >= 63 else 0
 
-            # Determinar fase para ordenar e icono
+            # Determinar fase para ordenar e icono. 
+            # Inversión matemática para ordenar: En W y L se prioriza la distancia menor al centro.
             if str_val >= 0 and mom_val >= 0:
                 pos_str = "🟢 Leading"
                 sort_order = 1
+                sort_score = score_dist
             elif str_val < 0 and mom_val >= 0:
                 pos_str = "🔵 Improving"
                 sort_order = 2
+                sort_score = score_dist
             elif str_val >= 0 and mom_val < 0:
                 pos_str = "🟡 Weakening"
                 sort_order = 3
+                sort_score = -score_dist # Invertido
             else:
                 pos_str = "🔴 Lagging"
                 sort_order = 4
+                sort_score = -score_dist # Invertido
 
             res_raw.append({
                 "tick": tick, "name": name, "reg": reg, "isec": isec, "ireg": ireg,
-                "score": score_dist, "str": str_val, "mom": mom_val,
+                "score": score_dist, "sort_score": sort_score, "str": str_val, "mom": mom_val,
                 "r1d": ret1d, "r3m": ret3m, "pos_str": pos_str, "sort_order": sort_order
             })
             rrg_hist[tick] = pts
@@ -383,6 +389,7 @@ with tab_app:
             final_rows.append({
                 "Ver": (r['tick'] in MY_PORTFOLIO), 
                 "Sort_Order": r['sort_order'],
+                "Sort_Score": r['sort_score'],
                 "Img_S": get_img_b64(r['isec']), 
                 "Img_R": get_img_b64(r['ireg']),
                 "Img_P": get_img_b64(p_ic),
@@ -392,8 +399,8 @@ with tab_app:
                 "POS": r['pos_str']
             })
 
-        # Ordenar: Primero por categoría (Leading > Improving > Weakening > Lagging), luego por Score (descendente)
-        df = pd.DataFrame(final_rows).sort_values(by=["Sort_Order", "Score"], ascending=[True, False]).reset_index(drop=True)
+        # Ordenar: Primero por categoría (Leading > Improving > Weakening > Lagging), luego por el Sort_Score oculto
+        df = pd.DataFrame(final_rows).sort_values(by=["Sort_Order", "Sort_Score"], ascending=[True, False]).reset_index(drop=True)
         df.insert(1, "#", range(1, len(df) + 1))
 
         conf = {
@@ -492,12 +499,16 @@ with tab_manual:
     
     ---
     
-    ### 4. Puntuación Definitiva (Score)
-    El algoritmo valora de forma positiva la magnitud de la rotación. Para ello, el programa calcula el *Score* basado estrictamente en la **distancia euclídea** desde el eje de coordenadas $(0,0)$ hasta la posición del activo en el momento actual (el punto más reciente de la "cola").
+    ### 4. Puntuación Definitiva (Score) y Ordenación
+    El algoritmo valora la magnitud de la rotación usando la **distancia euclídea** desde el centro de coordenadas $(0,0)$ hasta la posición actual del activo (el último punto de la "cola").
     
     $$Score=\sqrt{X^2+Y^2}$$
     
-    Cuanto mayor es la distancia respecto al origen, mayor es la fuerza del movimiento (ya sea liderando o rezagándose pronunciadamente). El algoritmo ordena la tabla final mostrando en primer lugar a los *Leading* con mayor amplitud, seguidos de los *Improving*, los *Weakening* y finalmente los *Lagging*.
+    Sin embargo, el sistema aplica una **lógica invertida para ordenar la tabla** de forma inteligente, creando un flujo natural desde los activos más potentes hasta los más castigados:
+    
+    1. **Fase del Ciclo:** Primero se agrupa por cuadrantes (Leading > Improving > Weakening > Lagging).
+    2. **Lógica Positiva (Leading e Improving):** En estos cuadrantes, **mayor distancia es mejor**. Lideran la lista los activos que están más lejos del centro (tienen mayor fuerza o inercia positiva).
+    3. **Lógica Invertida (Weakening y Lagging):** En estos cuadrantes, **menor distancia es mejor**. Lideran la lista los activos que están más cerca del origen de coordenadas. ¿El motivo? Significa que su debilidad está remitiendo y están a punto de salvarse rotando hacia el siguiente cuadrante positivo.
     """
     
     manual_texto = manual_texto.replace("__RS_SMOOTH__", str(RS_SMOOTH))
