@@ -11,9 +11,9 @@ from PIL import Image
 import io
 
 # --- 1. PARÁMETROS POR DEFECTO DEL PROGRAMA ---
-DEF_RS_SMOOTH = 42
-DEF_PERIODO_X = 126
-DEF_PERIODO_Y = 42
+DEF_RS_SMOOTH = 20
+DEF_PERIODO_X = 63
+DEF_PERIODO_Y = 21
 DEF_TAIL_LENGTH = 5  # Número de puntos en la cola (cada uno representa 5 días)
 
 # --- 2. CONFIGURACIÓN VISUAL ---
