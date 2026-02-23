@@ -53,10 +53,21 @@ with col_h2:
     st.markdown('<p class="main-title">PENGUIN PORTFOLIO</p>', unsafe_allow_html=True)
     st.markdown('<p class="alberto-sofia">Sofía y Alberto 2026</p>', unsafe_allow_html=True)
 
-# --- 3. PARÁMETROS FIJOS ---
-WEIGHT_POS = 60.0
-WEIGHT_ANG = 30.0
-WEIGHT_R2 = 10.0
+# --- 3. PARÁMETROS CONFIGURABLES (SIDEBAR) ---
+st.sidebar.header("⚙️ PARÁMETROS DEL MODELO")
+
+st.sidebar.subheader("Pesos del Score (%)")
+WEIGHT_POS = st.sidebar.number_input("Peso Posición", min_value=0.0, max_value=100.0, value=60.0, step=5.0)
+WEIGHT_ANG = st.sidebar.number_input("Peso Ángulo", min_value=0.0, max_value=100.0, value=30.0, step=5.0)
+WEIGHT_R2 = st.sidebar.number_input("Peso R2", min_value=0.0, max_value=100.0, value=10.0, step=5.0)
+
+st.sidebar.subheader("Motor RRG")
+RS_SMOOTH = st.sidebar.number_input("Suavizado del RS (Periodos)", min_value=1, max_value=100, value=20, step=1)
+PERIODO_X = st.sidebar.number_input("Periodo Eje X (STR)", min_value=10, max_value=252, value=100, step=5)
+PERIODO_Y = st.sidebar.number_input("Periodo Eje Y (MOM)", min_value=5, max_value=100, value=20, step=1)
+
+st.sidebar.subheader("Gráfico")
+TAIL_DOT_SIZE = st.sidebar.number_input("Tamaño puntos de la cola", min_value=1, max_value=150, value=25, step=5)
 
 WP = WEIGHT_POS / 100
 WA = WEIGHT_ANG / 100
@@ -290,13 +301,14 @@ def get_img_b64(filename):
     except:
         return TRANSPARENT_1X1
 
-def get_rrg_pts(ticker_df, bench_df):
+# MODIFICADO: Ahora recibe los parámetros dinámicos
+def get_rrg_pts(ticker_df, bench_df, rs_smooth, periodo_x, periodo_y):
     rs = (ticker_df / bench_df) * 100
-    rs_sm = rs.ewm(span=20, adjust=False).mean()
-    m_l, s_l = rs_sm.rolling(100).mean(), rs_sm.rolling(100).std()
+    rs_sm = rs.ewm(span=rs_smooth, adjust=False).mean()
+    m_l, s_l = rs_sm.rolling(periodo_x).mean(), rs_sm.rolling(periodo_x).std()
     rs_ratio = ((rs_sm - m_l) / s_l.replace(0, 1)) * 10 + 100
-    rs_mom_raw = rs_sm.pct_change(periods=20) * 100
-    m_s, s_s = rs_mom_raw.rolling(20).mean(), rs_mom_raw.rolling(20).std()
+    rs_mom_raw = rs_sm.pct_change(periods=periodo_y) * 100
+    m_s, s_s = rs_mom_raw.rolling(periodo_y).mean(), rs_mom_raw.rolling(periodo_y).std()
     rs_mom = ((rs_mom_raw - m_s) / s_s.replace(0, 1)) * 10 + 100
     return rs_ratio, rs_mom
 
@@ -325,7 +337,10 @@ with tab_app:
 
         for name, reg, tick, isec, ireg in ASSETS:
             if tick not in raw_prices.columns: continue
-            r_ser, m_ser = get_rrg_pts(raw_prices[tick], bench_p)
+            
+            # MODIFICADO: Pasamos los parámetros de la sidebar a la función
+            r_ser, m_ser = get_rrg_pts(raw_prices[tick], bench_p, RS_SMOOTH, PERIODO_X, PERIODO_Y)
+            
             if r_ser.isna().all() or len(r_ser) < 30: continue
 
             pts = []
@@ -421,7 +436,8 @@ with tab_app:
                     td = np.linspace(0, len(xs) - 1, 100)
                     ax.plot(make_interp_spline(tr, xs, k=2)(td), make_interp_spline(tr, ys, k=2)(td), lw=1.5, alpha=0.7)
 
-                ax.scatter(xs[:-1], ys[:-1], s=25, alpha=0.4)
+                # MODIFICADO: Usamos el parámetro de tamaño para los puntos de la cola
+                ax.scatter(xs[:-1], ys[:-1], s=TAIL_DOT_SIZE, alpha=0.4)
                 ax.scatter(xs[-1], ys[-1], s=160, edgecolors='white', linewidth=1.5, zorder=5)
                 ax.text(xs[-1], ys[-1], f"  {t}", fontsize=9, fontweight='bold', va='center')
 
@@ -438,9 +454,9 @@ with tab_app:
 
             st.pyplot(fig)
 
-
 with tab_manual:
-    st.markdown(r"""
+    # MODIFICADO: Sustituimos dinámicamente los valores en el texto del manual para que reflejen la configuración actual
+    manual_texto = r"""
     ## MANUAL TÉCNICO: MOTOR DE CÁLCULO PENGUIN PORTFOLIO PRO
     
     ### 1. Obtención de Datos Base
@@ -449,6 +465,7 @@ with tab_manual:
     ---
     
     ### 2. El Corazón del Sistema: Coordenadas RRG
+    
     Para saber si un activo está liderando o rezagado respecto al mundo, no miramos su precio aislado, sino su comportamiento relativo usando la metodología de los *Relative Rotation Graphs* (RRG). Generamos dos coordenadas: **Fuerza (X)** y **Momentum (Y)**.
     
     * **Paso A: Fuerza Relativa Básica (RS)**
@@ -456,15 +473,15 @@ with tab_manual:
         $$RS=\left(\frac{Precio_{Activo}}{Precio_{Benchmark}}\right)\times 100$$
         
     * **Paso B: Suavizado**
-        Para evitar el "ruido" diario, se aplica una Media Móvil Exponencial (EMA) de 20 periodos a la serie $RS$, obteniendo el $RS_{sm}$.
+        Para evitar el "ruido" diario, se aplica una Media Móvil Exponencial (EMA) de **__RS_SMOOTH__ periodos** a la serie $RS$, obteniendo el $RS_{sm}$.
     
     * **Paso C: Coordenada X (JdK RS-Ratio / STR)**
-        Mide la tendencia a largo plazo del activo frente al benchmark. Se normaliza el $RS_{sm}$ usando su media ($\mu$) y desviación estándar ($\sigma$) de los **últimos 100 periodos**. Se centra en 100.
-        $$X_{RRG}=\left(\frac{RS_{sm}-\mu_{100}}{\sigma_{100}}\right)\times 10+100$$
+        Mide la tendencia a largo plazo del activo frente al benchmark. Se normaliza el $RS_{sm}$ usando su media ($\mu$) y desviación estándar ($\sigma$) de los **últimos __PERIODO_X__ periodos**. Se centra en 100.
+        $$X_{RRG}=\left(\frac{RS_{sm}-\mu_{__PERIODO_X__}}{\sigma_{__PERIODO_X__}}\right)\times 10+100$$
     
     * **Paso D: Coordenada Y (JdK RS-Momentum / MOM)**
-        Mide la velocidad a la que cambia la fuerza relativa (la inercia a corto plazo). Se calcula la tasa de cambio porcentual a 20 periodos del $RS_{sm}$, y se vuelve a normalizar estadísticamente (media y desviación a 20 días).
-        $$Y_{RRG}=\left(\frac{\Delta\%RS_{sm}-\mu_{20}}{\sigma_{20}}\right)\times 10+100$$
+        Mide la velocidad a la que cambia la fuerza relativa (la inercia a corto plazo). Se calcula la tasa de cambio porcentual a **__PERIODO_Y__ periodos** del $RS_{sm}$, y se vuelve a normalizar estadísticamente (media y desviación a **__PERIODO_Y__ días**).
+        $$Y_{RRG}=\left(\frac{\Delta\%RS_{sm}-\mu_{__PERIODO_Y__}}{\sigma_{__PERIODO_Y__}}\right)\times 10+100$$
     
     ---
     
@@ -503,10 +520,20 @@ with tab_manual:
     ---
     
     ### 7. Nota Definitiva (Score)
-    Por último, el programa pondera las tres notas anteriores según los parámetros preestablecidos en el código:
-    * **60%** Peso a la Posición en el gráfico (P-Pos).
-    * **30%** Peso al Ángulo de ataque (P-Ang).
-    * **10%** Peso a la Linealidad del precio (P-R2).
+    Por último, el programa pondera las tres notas anteriores según la configuración actual:
+    * **__WEIGHT_POS__%** Peso a la Posición en el gráfico (P-Pos).
+    * **__WEIGHT_ANG__%** Peso al Ángulo de ataque (P-Ang).
+    * **__WEIGHT_R2__%** Peso a la Linealidad del precio (P-R2).
     
-    $$Score=(P_{Pos}\times 0.60)+(P_{Ang}\times 0.30)+(P_{R^2}\times 0.10)$$
-    """)
+    $$Score=(P_{Pos}\times \frac{__WEIGHT_POS__}{100})+(P_{Ang}\times \frac{__WEIGHT_ANG__}{100})+(P_{R^2}\times \frac{__WEIGHT_R2__}{100})$$
+    """
+    
+    # Reemplazamos los marcadores por los valores en tiempo real
+    manual_texto = manual_texto.replace("__RS_SMOOTH__", str(RS_SMOOTH))
+    manual_texto = manual_texto.replace("__PERIODO_X__", str(PERIODO_X))
+    manual_texto = manual_texto.replace("__PERIODO_Y__", str(PERIODO_Y))
+    manual_texto = manual_texto.replace("__WEIGHT_POS__", str(WEIGHT_POS))
+    manual_texto = manual_texto.replace("__WEIGHT_ANG__", str(WEIGHT_ANG))
+    manual_texto = manual_texto.replace("__WEIGHT_R2__", str(WEIGHT_R2))
+    
+    st.markdown(manual_texto)
