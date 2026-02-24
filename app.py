@@ -205,7 +205,6 @@ def descargar_precios_optimizados(tickers):
             pass 
             
     tickers_unicos = list(set(tickers))
-    # Ampliado a 2 años para permitir el backtest de 250 días
     data = yf.download(tickers_unicos, period="2y", auto_adjust=True, progress=False, threads=True)
     
     if data.empty:
@@ -372,25 +371,37 @@ else:
         # --- SECCIÓN DE BACKTESTING ---
         st.divider()
         col_bt1, col_bt2, col_bt3 = st.columns([1, 2, 1])
+        with col_bt1:
+            opcion_bt_dias = st.selectbox(
+                "Ventana de Backtest:",
+                ["10 días", "21 días", "42 días"],
+                index=0
+            )
+            bt_dias = int(opcion_bt_dias.split()[0])
+            
         with col_bt2:
+            st.markdown("<br>", unsafe_allow_html=True)
             if st.button("⚙️ Ejecutar Backtest: Top 3 Sectores vs MSCI World (Últ. 250 días)", use_container_width=True):
-                st.session_state.show_bt = not st.session_state.show_bt
+                st.session_state.show_bt = True
                 
         if st.session_state.show_bt:
-            with st.spinner("Simulando estrategia histórica (Evaluación cada 10 días, últimos 250 días)..."):
+            with st.spinner(f"Simulando estrategia histórica (Evaluación cada {bt_dias} días, últimos 250 días)..."):
                 fechas = precios_largo.index
                 
-                # Necesitamos al menos 250 días + 10 días de la primera ventana = 260 días bursátiles
-                if len(fechas) > 260:
+                if len(fechas) > (250 + bt_dias):
                     resultados_bt = []
-                    # Índices de rebalanceo cada 10 días bursátiles (últimos 250 días)
-                    indices_rebalanceo = list(range(-251, -1, 10))
+                    # Índices de rebalanceo cada X días bursátiles (últimos 250 días)
+                    indices_rebalanceo = list(range(-251, -1, bt_dias))
                     
                     for i in indices_rebalanceo:
                         fecha_inicio = fechas[i]
-                        fecha_fin = fechas[i+10] if (i+10) < 0 else fechas[-1]
+                        fecha_fin = fechas[i+bt_dias] if (i+bt_dias) < 0 else fechas[-1]
                         
-                        inicio_ventana = i - 10
+                        inicio_ventana = i - bt_dias
+                        # Por seguridad en caso de que falten días al inicio de la serie
+                        if inicio_ventana < -len(precios_largo):
+                            inicio_ventana = -len(precios_largo)
+                            
                         ventana_precios = precios_largo.iloc[inicio_ventana:i+1]
                         
                         precio_vivo = ventana_precios.iloc[-1]
@@ -414,7 +425,7 @@ else:
                         top_3 = ranking_df.head(3)['Sector'].tolist()
                         
                         precios_inicio = precios_largo.iloc[i]
-                        precios_fin = precios_largo.iloc[i+10] if (i+10) < 0 else precios_largo.iloc[-1]
+                        precios_fin = precios_largo.iloc[i+bt_dias] if (i+bt_dias) < 0 else precios_largo.iloc[-1]
                         
                         retornos_activos = ((precios_fin / precios_inicio) - 1) * 100
                         df_ret = pd.DataFrame({'Retorno': retornos_activos})
@@ -437,7 +448,7 @@ else:
                         
                     df_res_bt = pd.DataFrame(resultados_bt)
                     
-                    st.markdown("### 📊 Resultados Simulación Anual (Ventana/Rebalanceo 10d)")
+                    st.markdown(f"### 📊 Resultados Simulación Anual (Ventana/Rebalanceo {bt_dias}d)")
                     estilo_bt = df_res_bt.style.format({
                         'Retorno Top 3': "{:.2f} %",
                         'Retorno MSCI': "{:.2f} %",
@@ -455,7 +466,7 @@ else:
                     col_r3.metric("Alpha Generado (1 Año)", f"{(prod_top3 - prod_msci):.2f} %")
                     
                 else:
-                    st.warning("Historial insuficiente. Se necesitan 261 días bursátiles para el backtesting.")
+                    st.warning(f"Historial insuficiente. Se necesitan {250 + bt_dias} días bursátiles para el backtesting.")
 
     # --- PANTALLA SECUNDARIA (COMPONENTES) ---
     elif st.session_state.page == 'components':
