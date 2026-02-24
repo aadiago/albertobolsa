@@ -52,9 +52,9 @@ with col_h2:
 
 st.divider()
 
-# --- 3. MOTOR DE EXTRACCIÓN Y TRADUCCIÓN DE DATOS (VERSIÓN 7) ---
+# --- 3. MOTOR DE EXTRACCIÓN Y TRADUCCIÓN DE DATOS (VERSIÓN 8 - FIX NORDICS) ---
 @st.cache_data(ttl=86400) 
-def obtener_empresas_msci_world_v7():
+def obtener_empresas_msci_world_v8():
     url = "https://www.ishares.com/us/products/239696/ishares-msci-world-etf/1467271812596.ajax?fileType=csv&fileName=URTH_holdings&dataType=fund"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"
@@ -141,11 +141,14 @@ def obtener_empresas_msci_world_v7():
             ticker_final = ticker_base
             asignado = False
             
-            # 🛡️ REGLA EE.UU
+            # 🛡️ REGLA EE.UU MEJORADA (Euronext y Nasdaq Nordic bypass)
             bolsas_us = ['new york', 'nasdaq', 'nyse', 'nyq', 'nms', 'united states']
-            if any(b in bolsa for b in bolsas_us) and 'euronext' not in bolsa:
-                ticker_final = ticker_base
-                asignado = True
+            excepciones_nordicas = ['stockholm', 'helsinki', 'copenhagen', 'nordic']
+            
+            if any(b in bolsa for b in bolsas_us):
+                if 'euronext' not in bolsa and not any(ex in bolsa for ex in excepciones_nordicas):
+                    ticker_final = ticker_base
+                    asignado = True
             
             if not asignado:
                 for mercado, sufijo in sufijos.items():
@@ -181,13 +184,12 @@ def obtener_empresas_msci_world_v7():
         st.error(f"Error procesando el archivo de BlackRock: {e}")
         return pd.DataFrame()
 
-# 🛡️ FIX DEFINITIVO DE DESCARGAS MASIVAS (v7)
+# 🛡️ DESCARGAS MASIVAS (v8)
 @st.cache_data(ttl=3600) 
-def descargar_precios_v7(tickers):
+def descargar_precios_v8(tickers):
     if not tickers:
         return pd.DataFrame()
         
-    # Limpiamos duplicados y evitamos bloqueos por IP desactivando hilos
     tickers_unicos = list(set(tickers))
     data = yf.download(tickers_unicos, period="4mo", auto_adjust=True, progress=False, threads=False)
     
@@ -222,7 +224,7 @@ def dar_color(val):
     return ''
 
 # --- 4. LÓGICA DE INTERFAZ Y CÁLCULO ---
-df_msci = obtener_empresas_msci_world_v7()
+df_msci = obtener_empresas_msci_world_v8()
 
 if not df_msci.empty:
     sectores = ["Todos los Sectores"] + sorted(df_msci['GICS Sector'].unique())
@@ -243,7 +245,7 @@ if not df_msci.empty:
     peso_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Peso_Global']))
     
     with st.spinner(f"Sincronizando {len(tickers_sector)} activos globales de forma segura..."):
-        precios = descargar_precios_v7(tickers_sector)
+        precios = descargar_precios_v8(tickers_sector)
     
     if not precios.empty:
         resultados = []
