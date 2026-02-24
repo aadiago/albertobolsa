@@ -298,7 +298,7 @@ else:
                 
         dias_analisis = int(opcion_dias.split()[0])
                 
-        with st.spinner(f"Calculando amplitud y ganancias de {dias_analisis} días en tiempo real... esto puede tardar unos minutos la primera vez (descarga segura sin crasheo)."):
+        with st.spinner(f"Calculando amplitud y ganancias de {dias_analisis} días en tiempo real... (Si es la primera vez hoy, puede tardar unos minutos en descargar el histórico 5Y)"):
             tickers_todos = df_msci['Symbol_Yahoo'].tolist()
             precios_largo = descargar_precios_optimizados(tickers_todos)
             precios_corto = descargar_precios_tiempo_real(tickers_todos)
