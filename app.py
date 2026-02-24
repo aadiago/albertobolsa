@@ -12,7 +12,7 @@ st.set_page_config(layout="wide", page_title="MSCI WORLD TRACKER PRO", page_icon
 if 'page' not in st.session_state:
     st.session_state.page = 'main'
 
-# Parámetros de Análisis (Aplicados por defecto)
+# Parámetros de Análisis (Aplicados por defecto según tu configuración)
 PARAM_PERIODOS_REG = 63
 PARAM_R2_MIN = 60
 PARAM_RSI_MIN = 50
@@ -345,15 +345,20 @@ else:
                 
                 resumen_sectores = []
                 for sector, group in df_completo.groupby('GICS Sector'):
+                    total_activos = len(group)
                     total_maximos = group['Maximos'].sum()
                     total_minimos = group['Minimos'].sum()
                     diferencia_neta = total_maximos - total_minimos
+                    
+                    # Calcular el porcentaje en función del número de valores procesados en este sector
+                    dif_neta_pct = (diferencia_neta / total_activos) * 100 if total_activos > 0 else 0
+                    
                     retorno_sector = promedio_ponderado(group, 'Retorno')
                     
                     resumen_sectores.append({
                         'Sector': sector,
                         'Peso (%)': group['Peso_Global'].sum(),
-                        f'Dif. Neta ({opcion_dias})': diferencia_neta,
+                        f'Dif. Neta % ({opcion_dias})': dif_neta_pct,
                         f'Rendimiento ({opcion_dias})': retorno_sector
                     })
                     
@@ -362,7 +367,7 @@ else:
                 st.markdown("<br>", unsafe_allow_html=True)
                 estilo_resumen = df_resumen.style.format({
                                                      "Peso (%)": "{:.2f} %",
-                                                     f'Dif. Neta ({opcion_dias})': "{:.0f}",
+                                                     f'Dif. Neta % ({opcion_dias})': "{:.2f} %",
                                                      f'Rendimiento ({opcion_dias})': "{:.2f} %"
                                                  })
                 st.dataframe(estilo_resumen, use_container_width=True, hide_index=True, height=480)
