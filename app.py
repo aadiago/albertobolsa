@@ -5,10 +5,10 @@ from datetime import datetime, timedelta
 import time
 
 # --- 1. CONFIGURACIÓN ---
-st.set_page_config(layout="wide", page_title="Test 3 Años - Sector Rotator")
+st.set_page_config(layout="wide", page_title="Safe Mode - Sector Rotator")
 
-st.title("🧪 Test de Estabilidad (3 años)")
-st.info("Estamos forzando la descarga de solo los últimos 3 años para descartar bloqueos por volumen.")
+st.title("🛡️ Modo Seguro (Python 3.13 Stable)")
+st.info("Esta versión utiliza peticiones directas para evitar el RuntimeError de hilos.")
 
 # Activos
 SECTORES = {
@@ -21,60 +21,70 @@ BENCHMARK = "EUNL.DE"
 COMMODITIES = ["HG=F", "GC=F"]
 ALL_TICKERS = list(SECTORES.values()) + [BENCHMARK] + COMMODITIES
 
-# --- 2. MOTOR DE DATOS ULTRA-LIGERO ---
-@st.cache_data(ttl=3600)
-def test_descarga_3_años():
-    fin = datetime.now()
-    inicio = fin - timedelta(days=3 * 365)
-    
-    # Descargamos uno a uno con una pausa para que el servidor no se sature
+# --- 2. MOTOR DE DATOS (SIN CACHÉ PARA DIAGNÓSTICO) ---
+# Si esto funciona, luego activaremos la caché.
+def descargar_datos_directos():
     master_data = {}
-    progreso = st.progress(0)
+    progress_bar = st.progress(0)
     status_text = st.empty()
     
     for i, ticker in enumerate(ALL_TICKERS):
-        status_text.text(f"Descargando ({i+1}/{len(ALL_TICKERS)}): {ticker}...")
         try:
-            # Usamos period="3y" que es la forma más rápida en Yahoo
-            data = yf.download(ticker, start=inicio, end=fin, progress=False, threads=False)
-            if not data.empty:
-                # Extraemos la columna 'Close' de forma segura
-                if isinstance(data.columns, pd.MultiIndex):
-                    master_data[ticker] = data['Close'][ticker]
-                else:
-                    master_data[ticker] = data['Close']
-            time.sleep(0.5) # Pausa de seguridad
+            status_text.text(f"Conectando con: {ticker}...")
+            # Usamos Ticker() + history() que es más estable que download()
+            t = yf.Ticker(ticker)
+            # Pedimos solo 3 años como pediste para la prueba
+            df_hist = t.history(period="3y")
+            
+            if not df_hist.empty:
+                # Forzamos que la serie sea limpia
+                master_data[ticker] = df_hist['Close']
+            
+            # Pequeña pausa para no saturar la conexión
+            time.sleep(0.2)
         except Exception as e:
-            st.warning(f"Error en {ticker}: {e}")
-        
-        progreso.progress((i + 1) / len(ALL_TICKERS))
+            st.error(f"Error en {ticker}: {str(e)}")
+            
+        progress_bar.progress((i + 1) / len(ALL_TICKERS))
     
-    status_text.text("✅ Descarga finalizada.")
-    return pd.DataFrame(master_data).ffill()
+    status_text.text("✅ Sincronización finalizada.")
+    return pd.DataFrame(master_data)
 
 # --- 3. EJECUCIÓN ---
-if st.button("🚀 Iniciar Test de 3 Años"):
-    df = test_descarga_3_años()
-    
-    if not df.empty:
-        st.success(f"¡Éxito! Se han descargado {len(df)} días de datos.")
+if st.button("🚀 Ejecutar Diagnóstico de 3 Años"):
+    try:
+        df = descargar_datos_directos()
         
-        # Lógica rápida de Ratio para verificar
-        ratio = df["HG=F"] / df["GC=F"]
-        ma = ratio.rolling(window=50).mean()
-        
-        # Gráfico rápido
-        st.subheader("Ratio Cobre/Oro (Últimos 3 años)")
-        df_plot = pd.DataFrame({"Ratio": ratio, "Media 50d": ma})
-        st.line_chart(df_plot)
-        
-        # Mostrar tabla de sectores para confirmar
-        st.subheader("Precios de Cierre (Muestra)")
-        st.dataframe(df.tail())
-    else:
-        st.error("La descarga devolvió un DataFrame vacío.")
+        if not df.empty:
+            st.success(f"¡Conseguido! Datos obtenidos para {len(df.columns)} activos.")
+            
+            # Lógica de la estrategia resumida
+            ratio = (df["HG=F"] / df["GC=F"]).ffill()
+            ma = ratio.rolling(window=50).mean()
+            
+            # Resultados visuales
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("Ratio Cobre/Oro")
+                st.line_chart(ratio)
+            with col2:
+                st.subheader("Tabla de Datos (Cierres)")
+                st.dataframe(df.tail())
+                
+            # Identificación de Régimen Actual
+            if ratio.iloc[-1] > ma.iloc[-1]:
+                st.warning("🔥 Régimen Actual: RISK-ON (Cíclico)")
+            else:
+                st.info("🛡️ Régimen Actual: RISK-OFF (Defensivo)")
+                
+        else:
+            st.error("El DataFrame está vacío. Yahoo Finance no devolvió datos.")
+            
+    except Exception as global_e:
+        st.exception(global_e)
 
 with st.sidebar:
-    if st.button("🗑️ Limpiar Caché"):
-        st.cache_data.clear()
-        st.rerun()
+    st.write("Configuración de Prueba")
+    st.write("- Periodo: 3 años")
+    st.write("- Método: yf.Ticker.history")
+    st.write("- Hilos: Desactivados")
