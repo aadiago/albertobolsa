@@ -293,13 +293,11 @@ else:
         with col1:
             st.subheader("Resumen Sectorial MSCI World")
         with col2:
-            if st.button("📊 Componentes", use_container_width=True):
+            if st.button("📊 Ver Componentes", use_container_width=True):
                 st.session_state.page = 'components'
                 st.rerun()
                 
-        with st.spinner("Actualizando datos en tiempo real..."):
-            sector_weights = df_msci.groupby('GICS Sector')['Peso_Global'].sum().sort_values(ascending=False)
-            
+        with st.spinner("Actualizando datos en tiempo real y calculando osciladores..."):
             tickers_todos = df_msci['Symbol_Yahoo'].tolist()
             precios_largo = descargar_precios_optimizados(tickers_todos)
             precios_corto = descargar_precios_tiempo_real(tickers_todos)
@@ -307,19 +305,19 @@ else:
             if not precios_largo.empty and not precios_corto.empty:
                 precios_largo = precios_largo.ffill()
                 precios_corto = precios_corto.ffill()
-                datos_retornos = []
                 
+                # Matriz de retornos diarios de todo el año para el McClellan
+                retornos_diarios = precios_largo.pct_change()
+                
+                datos_retornos = []
                 for ticker in tickers_todos:
                     if ticker in precios_largo.columns and ticker in precios_corto.columns:
                         serie_larga = precios_largo[ticker].dropna()
                         serie_corta = precios_corto[ticker].dropna()
                         
                         if len(serie_larga) >= 252 and len(serie_corta) >= 2:
-                            # p_act y p_1d se obtienen siempre del precio en tiempo real
                             p_act = float(serie_corta.iloc[-1])
                             p_1d = float(serie_corta.iloc[-2])
-                            
-                            # Los datos largos usan la base histórica
                             p_1m = float(serie_larga.iloc[-22])
                             p_3m = float(serie_larga.iloc[-64])
                             p_1y = float(serie_larga.iloc[-252])
@@ -341,9 +339,28 @@ else:
                 
                 resumen_sectores = []
                 for sector, group in df_completo.groupby('GICS Sector'):
+                    # --- CÁLCULO OSCILADOR MCCLELLAN DEL SECTOR ---
+                    tickers_del_sector = group['Symbol_Yahoo'].tolist()
+                    tickers_validos_mcc = [t for t in tickers_del_sector if t in retornos_diarios.columns]
+                    
+                    if tickers_validos_mcc:
+                        retornos_sector = retornos_diarios[tickers_validos_mcc]
+                        avances = (retornos_sector > 0).sum(axis=1)
+                        retrocesos = (retornos_sector < 0).sum(axis=1)
+                        avances_netos = avances - retrocesos
+                        
+                        # EMAs de 19 y 39 días
+                        ema19 = avances_netos.ewm(span=19, adjust=False).mean()
+                        ema39 = avances_netos.ewm(span=39, adjust=False).mean()
+                        
+                        mcclellan = (ema19 - ema39).iloc[-1]
+                    else:
+                        mcclellan = 0.0
+                    
                     resumen_sectores.append({
                         'Sector': sector,
                         'Peso (%)': group['Peso_Global'].sum(),
+                        'McClellan Osc.': mcclellan,
                         '1 Día': promedio_ponderado(group, '1 Día'),
                         '1 Mes': promedio_ponderado(group, '1 Mes'),
                         '3 Meses': promedio_ponderado(group, '3 Meses'),
@@ -352,20 +369,17 @@ else:
                     
                 df_resumen = pd.DataFrame(resumen_sectores).sort_values(by='Peso (%)', ascending=False)
                 
-                col_chart, col_table = st.columns([1, 1.5])
-                with col_chart:
-                    st.markdown("##### Distribución de Sectores (%)")
-                    st.bar_chart(sector_weights)
-                with col_table:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    estilo_resumen = df_resumen.style.format({
-                                                         "Peso (%)": "{:.2f} %",
-                                                         "1 Día": "{:.2f} %",
-                                                         "1 Mes": "{:.2f} %",
-                                                         "3 Meses": "{:.2f} %",
-                                                         "1 Año": "{:.2f} %"
-                                                     })
-                    st.dataframe(estilo_resumen, use_container_width=True, hide_index=True, height=450)
+                # Visualización Principal enfocada solo en la tabla
+                st.markdown("<br>", unsafe_allow_html=True)
+                estilo_resumen = df_resumen.style.format({
+                                                     "Peso (%)": "{:.2f} %",
+                                                     "McClellan Osc.": "{:.2f}",
+                                                     "1 Día": "{:.2f} %",
+                                                     "1 Mes": "{:.2f} %",
+                                                     "3 Meses": "{:.2f} %",
+                                                     "1 Año": "{:.2f} %"
+                                                 })
+                st.dataframe(estilo_resumen, use_container_width=True, hide_index=True, height=450)
 
     # --- PANTALLA SECUNDARIA (COMPONENTES) ---
     elif st.session_state.page == 'components':
