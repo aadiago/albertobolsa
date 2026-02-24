@@ -199,7 +199,6 @@ def obtener_empresas_msci_world_v9():
         return pd.DataFrame()
 
 def descargar_precios_optimizados(tickers):
-    """Descarga el historial largo de 1 año y lo guarda en CSV para máxima velocidad"""
     if not tickers:
         return pd.DataFrame()
         
@@ -250,7 +249,6 @@ def descargar_precios_optimizados(tickers):
 
 @st.cache_data(ttl=120) 
 def descargar_precios_tiempo_real(tickers):
-    """Descarga ligera (5 días) en tiempo real con actualización cada 2 minutos"""
     if not tickers:
         return pd.DataFrame()
         
@@ -306,7 +304,6 @@ else:
                 precios_largo = precios_largo.ffill()
                 precios_corto = precios_corto.ffill()
                 
-                # Matriz de retornos diarios de todo el año para el McClellan
                 retornos_diarios = precios_largo.pct_change()
                 
                 datos_retornos = []
@@ -339,7 +336,7 @@ else:
                 
                 resumen_sectores = []
                 for sector, group in df_completo.groupby('GICS Sector'):
-                    # --- CÁLCULO OSCILADOR MCCLELLAN DEL SECTOR ---
+                    # --- CÁLCULO OSCILADOR MCCLELLAN E HISTÓRICO ---
                     tickers_del_sector = group['Symbol_Yahoo'].tolist()
                     tickers_validos_mcc = [t for t in tickers_del_sector if t in retornos_diarios.columns]
                     
@@ -349,18 +346,24 @@ else:
                         retrocesos = (retornos_sector < 0).sum(axis=1)
                         avances_netos = avances - retrocesos
                         
-                        # EMAs de 19 y 39 días
                         ema19 = avances_netos.ewm(span=19, adjust=False).mean()
                         ema39 = avances_netos.ewm(span=39, adjust=False).mean()
+                        ema_diff = ema19 - ema39
                         
-                        mcclellan = (ema19 - ema39).iloc[-1]
+                        mcc_hoy = ema_diff.iloc[-1] if len(ema_diff) >= 1 else 0.0
+                        mcc_10d = ema_diff.iloc[-11] if len(ema_diff) >= 11 else 0.0
+                        mcc_21d = ema_diff.iloc[-22] if len(ema_diff) >= 22 else 0.0
+                        mcc_42d = ema_diff.iloc[-43] if len(ema_diff) >= 43 else 0.0
                     else:
-                        mcclellan = 0.0
+                        mcc_hoy = mcc_10d = mcc_21d = mcc_42d = 0.0
                     
                     resumen_sectores.append({
                         'Sector': sector,
                         'Peso (%)': group['Peso_Global'].sum(),
-                        'McClellan Osc.': mcclellan,
+                        'McClellan Hoy': mcc_hoy,
+                        'McClellan -10d': mcc_10d,
+                        'McClellan -21d': mcc_21d,
+                        'McClellan -42d': mcc_42d,
                         '1 Día': promedio_ponderado(group, '1 Día'),
                         '1 Mes': promedio_ponderado(group, '1 Mes'),
                         '3 Meses': promedio_ponderado(group, '3 Meses'),
@@ -369,17 +372,20 @@ else:
                     
                 df_resumen = pd.DataFrame(resumen_sectores).sort_values(by='Peso (%)', ascending=False)
                 
-                # Visualización Principal enfocada solo en la tabla
+                # Visualización Principal a ancho completo
                 st.markdown("<br>", unsafe_allow_html=True)
                 estilo_resumen = df_resumen.style.format({
                                                      "Peso (%)": "{:.2f} %",
-                                                     "McClellan Osc.": "{:.2f}",
+                                                     "McClellan Hoy": "{:.2f}",
+                                                     "McClellan -10d": "{:.2f}",
+                                                     "McClellan -21d": "{:.2f}",
+                                                     "McClellan -42d": "{:.2f}",
                                                      "1 Día": "{:.2f} %",
                                                      "1 Mes": "{:.2f} %",
                                                      "3 Meses": "{:.2f} %",
                                                      "1 Año": "{:.2f} %"
                                                  })
-                st.dataframe(estilo_resumen, use_container_width=True, hide_index=True, height=450)
+                st.dataframe(estilo_resumen, use_container_width=True, hide_index=True, height=480)
 
     # --- PANTALLA SECUNDARIA (COMPONENTES) ---
     elif st.session_state.page == 'components':
