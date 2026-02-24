@@ -80,41 +80,70 @@ def obtener_empresas_msci_world_v2():
         df = df.dropna(subset=['Ticker', 'Sector'])
         df = df[df['Asset Class'] == 'Equity']
         
-        # Traductor de Bolsas a Nomenclatura Yahoo Finance
+        # Traductor de Bolsas a Nomenclatura Yahoo Finance (Ampliado)
         sufijos = {
-            'London': '.L',
-            'Tokyo': '.T',
-            'Toronto': '.TO',
-            'Euronext Amsterdam': '.AS',
-            'Euronext Paris': '.PA',
-            'Xetra': '.DE',
-            'SIX Swiss': '.SW',
-            'Madrid': '.MC',
-            'Borsa Italiana': '.MI',
-            'Sydney': '.AX',
-            'Copenhagen': '.CO',
-            'Stockholm': '.ST',
-            'Oslo': '.OL',
-            'Helsinki': '.HE',
-            'Hong Kong': '.HK',
-            'Singapore': '.SI',
-            'Vienna': '.VI',
-            'Tel Aviv': '.TA',
-            'New Zealand': '.NZ',
-            'Dublin': '.IR'
+            'london': '.L',
+            'tokyo': '.T',
+            'toronto': '.TO',
+            'amsterdam': '.AS',
+            'paris': '.PA',
+            'brussels': '.BR',      # Añadido Bélgica
+            'belgium': '.BR',       # Respaldo por país
+            'lisbon': '.LS',        # Añadido Portugal
+            'xetra': '.DE',
+            'frankfurt': '.DE',
+            'germany': '.DE',
+            'six swiss': '.SW',
+            'switzerland': '.SW',
+            'madrid': '.MC',
+            'spain': '.MC',
+            'borsa italiana': '.MI',
+            'milan': '.MI',
+            'italy': '.MI',
+            'sydney': '.AX',
+            'australia': '.AX',
+            'copenhagen': '.CO',
+            'denmark': '.CO',
+            'stockholm': '.ST',     # Suecia
+            'sweden': '.ST',        # Respaldo por país
+            'oslo': '.OL',
+            'norway': '.OL',
+            'helsinki': '.HE',
+            'finland': '.HE',
+            'hong kong': '.HK',
+            'singapore': '.SI',
+            'vienna': '.VI',
+            'austria': '.VI',
+            'tel aviv': '.TA',
+            'israel': '.TA',
+            'new zealand': '.NZ',
+            'dublin': '.IR',
+            'ireland': '.IR'
         }
         
         tickers_adaptados = []
         for _, row in df.iterrows():
-            # Limpieza exhaustiva del ticker (puntos, espacios y barras a guiones)
+            # Limpieza exhaustiva del ticker
             ticker_base = str(row['Ticker']).strip().replace('.', '-').replace(' ', '-').replace('/', '-')
-            bolsa = str(row['Exchange'])
+            bolsa = str(row['Exchange']).lower()
+            pais = str(row['Location']).lower()
             ticker_final = ticker_base
             
+            # Buscamos coincidencias primero en el Exchange, y si no, en la Localización (País)
+            asignado = False
             for mercado, sufijo in sufijos.items():
                 if mercado in bolsa:
                     ticker_final = f"{ticker_base}{sufijo}"
+                    asignado = True
                     break
+            
+            # Si la bolsa no nos dio el sufijo, probamos con el país
+            if not asignado:
+                for mercado, sufijo in sufijos.items():
+                    if mercado in pais:
+                        ticker_final = f"{ticker_base}{sufijo}"
+                        break
+                        
             tickers_adaptados.append(ticker_final)
             
         df['Symbol_Yahoo'] = tickers_adaptados
