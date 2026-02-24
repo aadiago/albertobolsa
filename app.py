@@ -55,7 +55,7 @@ def obtener_empresas_msci_world():
     try:
         response = requests.get(url, headers=headers)
         
-        # Búsqueda dinámica de la cabecera (evita errores si BlackRock añade líneas de aviso)
+        # Búsqueda dinámica de la cabecera
         lineas = response.text.splitlines()
         header_idx = 0
         for i, linea in enumerate(lineas):
@@ -87,12 +87,14 @@ def obtener_empresas_msci_world():
             'Singapore': '.SI',
             'Vienna': '.VI',
             'Tel Aviv': '.TA',
-            'New Zealand': '.NZ'
+            'New Zealand': '.NZ',
+            'Dublin': '.IR'
         }
         
         tickers_adaptados = []
         for _, row in df.iterrows():
-            ticker_base = str(row['Ticker']).replace('.', '-').strip()
+            # Limpieza exhaustiva del ticker (puntos, espacios y barras a guiones)
+            ticker_base = str(row['Ticker']).strip().replace('.', '-').replace(' ', '-').replace('/', '-')
             bolsa = str(row['Exchange'])
             ticker_final = ticker_base
             
@@ -103,16 +105,22 @@ def obtener_empresas_msci_world():
             tickers_adaptados.append(ticker_final)
             
         df['Symbol_Yahoo'] = tickers_adaptados
-        df = df.rename(columns={'Name': 'Security', 'Sector': 'GICS Sector'})
         
-        return df[['Symbol_Yahoo', 'Security', 'GICS Sector']]
+        # Renombrar para mantener compatibilidad
+        df = df.rename(columns={
+            'Name': 'Security', 
+            'Sector': 'GICS Sector',
+            'Location': 'Nacionalidad',
+            'Weight (%)': 'Peso_Global'
+        })
+        
+        return df[['Symbol_Yahoo', 'Security', 'GICS Sector', 'Nacionalidad', 'Peso_Global']]
     except Exception as e:
         st.error(f"Error procesando el archivo de BlackRock: {e}")
         return pd.DataFrame()
 
 @st.cache_data(ttl=3600) # Cachear precios 1 hora
 def descargar_precios(tickers):
-    # Descargamos 4 meses para asegurar los 50 días de cotización hábiles
     data = yf.download(tickers, period="4mo", auto_adjust=True, progress=False)
     if 'Close' in data:
         return data['Close']
@@ -130,35 +138,36 @@ if not df_msci.empty:
     
     empresas_sector = df_msci[df_msci['GICS Sector'] == sector_elegido]
     tickers_sector = empresas_sector['Symbol_Yahoo'].tolist()
+    
+    # Diccionarios de acceso rápido
     nombres_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Security']))
+    nacionalidad_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Nacionalidad']))
+    peso_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Peso_Global']))
     
     with st.spinner(f"Sincronizando {len(tickers_sector)} activos globales de {sector_elegido}..."):
         precios = descargar_precios(tickers_sector)
     
     if not precios.empty:
         resultados = []
-        activos_fallidos = [] # Aquí guardaremos los que den error
+        activos_fallidos = []
         
         precios = precios.ffill()
         if isinstance(precios, pd.Series):
             precios = precios.to_frame(name=tickers_sector[0])
             
         for ticker in tickers_sector:
-            # Comprobación 1: ¿Descargó Yahoo Finance la columna?
             if ticker not in precios.columns:
                 activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict[ticker], "Motivo": "No encontrado en Yahoo Finance"})
                 continue
                 
             serie = precios[ticker].dropna()
             
-            # Comprobación 2: ¿Hay suficientes días de histórico?
             if len(serie) < 51: 
                 activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict[ticker], "Motivo": "Historial insuficiente (< 50 días)"})
                 continue
                 
             precio_actual = float(serie.iloc[-1])
             
-            # Cálculos (Días hábiles)
             try:
                 ret_1d = ((precio_actual / float(serie.iloc[-2])) - 1) * 100
                 ret_5d = ((precio_actual / float(serie.iloc[-6])) - 1) * 100
@@ -169,6 +178,8 @@ if not df_msci.empty:
                 resultados.append({
                     "Ticker": ticker,
                     "Empresa": nombres_dict[ticker],
+                    "Nacionalidad": nacionalidad_dict[ticker],
+                    "Peso Global": peso_dict[ticker],
                     "Precio Actual": precio_actual,
                     "1 Día": ret_1d,
                     "5 Días": ret_5d,
@@ -177,12 +188,13 @@ if not df_msci.empty:
                     "50 Días": ret_50d
                 })
             except Exception:
-                activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict[ticker], "Motivo": "Error de cálculo matemático"})
+                activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict[ticker], "Motivo": "Error de cálculo"})
                 
         # --- 5. VISUALIZACIÓN DE RESULTADOS ---
         if resultados:
             df_resultados = pd.DataFrame(resultados)
-            df_resultados = df_resultados.sort_values(by="5 Días", ascending=False).reset_index(drop=True)
+            # Ordenamos por el peso en el índice para ver los gigantes primero
+            df_resultados = df_resultados.sort_values(by="Peso Global", ascending=False).reset_index(drop=True)
             df_resultados.insert(0, "#", range(1, len(df_resultados) + 1))
             
             st.markdown(f"### 📈 Rendimiento Global: **{sector_elegido}**")
@@ -191,6 +203,8 @@ if not df_msci.empty:
                 "#": st.column_config.NumberColumn("#", width="small"),
                 "Ticker": st.column_config.TextColumn("Ticker", width="small"),
                 "Empresa": st.column_config.TextColumn("Empresa", width="medium"),
+                "Nacionalidad": st.column_config.TextColumn("País", width="small"),
+                "Peso Global": st.column_config.NumberColumn("Peso (%)", format="%.3f %%"),
                 "Precio Actual": st.column_config.NumberColumn("Cierre", format="%.2f"),
                 "1 Día": st.column_config.NumberColumn("1 Día", format="%.2f %%"),
                 "5 Días": st.column_config.NumberColumn("5 Días", format="%.2f %%"),
@@ -199,13 +213,12 @@ if not df_msci.empty:
                 "50 Días": st.column_config.NumberColumn("50 Días", format="%.2f %%"),
             }
             
-            st.dataframe(df_resultados, use_container_width=True, hide_index=True, column_config=column_config, height=500)
+            st.dataframe(df_resultados, use_container_width=True, hide_index=True, column_config=column_config, height=600)
         
         # --- 6. REPORTE DE ACTIVOS FALLIDOS ---
         if activos_fallidos:
             st.divider()
             st.markdown(f"### ⚠️ Activos no cargados ({len(activos_fallidos)})")
-            st.markdown("Las siguientes empresas no han podido ser procesadas. Esto suele ocurrir por discrepancias menores en los Tickers entre BlackRock y Yahoo Finance, fusiones/adquisiciones recientes, o falta de liquidez.")
             
             df_fallos = pd.DataFrame(activos_fallidos)
             st.dataframe(df_fallos, use_container_width=True, hide_index=True)
