@@ -23,111 +23,133 @@ with st.sidebar:
     st.header("Configuración")
     years = st.slider("Años de Backtesting", 1, 15, 5)
     ma_ratio = st.number_input("Media Móvil Ratio (Días)", value=50)
-    st.info("La estrategia selecciona los 3 mejores sectores cíclicos si el Ratio > Media, o los 3 mejores defensivos si el Ratio < Media.")
+    st.info("Estrategia: Ratio > Media = Cíclicos | Ratio < Media = Defensivos")
 
-# Definición de Tickers
+# Definición de Tickers (ETFs de Xtrackers/iShares en EU)
 SECTORES = {
-    "Tecnología": "TELW.PA",
-    "Energía": "WELJ.DE",
-    "Salud": "WELW.DE",
-    "Consumo Básico": "XDW0.DE",
-    "Financiero": "WF1E.DE",
-    "Consumo Discrecional": "WELS.DE",
-    "Industriales": "XDWI.DE",
-    "Materiales": "XDWM.DE",
-    "Utilities": "SPY2.DE",
-    "Comunicación": "WELU.DE",
-    "Real Estate": "WELD.DE"
+    "Tecnología": "TELW.PA", "Energía": "WELJ.DE", "Salud": "WELW.DE",
+    "Consumo Básico": "XDW0.DE", "Financiero": "WF1E.DE", "Consumo Discrecional": "WELS.DE",
+    "Industriales": "XDWI.DE", "Materiales": "XDWM.DE", "Utilities": "SPY2.DE",
+    "Comunicación": "WELU.DE", "Real Estate": "WELD.DE"
 }
 
 CICLICOS = ["Tecnología", "Energía", "Financiero", "Consumo Discrecional", "Industriales", "Materiales"]
 DEFENSIVOS = ["Salud", "Consumo Básico", "Utilities", "Comunicación", "Real Estate"]
-BENCHMARK = "EUNL.DE" # MSCI World
+BENCHMARK = "EUNL.DE"
 
-# --- 3. MOTOR DE DATOS ---
-@st.cache_data
+# --- 3. MOTOR DE DATOS (CORREGIDO) ---
+@st.cache_data(ttl=3600)
 def get_backtest_data(years_back):
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=years_back * 365)
+    start_date = end_date - timedelta(days=years_back * 365 + 100) # Días extra para la media móvil
     
-    # Descargar Cobre y Oro para el Ratio
-    commodities = yf.download(["HG=F", "GC=F"], start=start_date, end=end_date)['Close']
-    ratio = commodities["HG=F"] / commodities["GC=F"]
+    try:
+        # Descarga de Commodities para el Ratio
+        # Usamos threads=False para mayor estabilidad en Streamlit Cloud
+        raw_comm = yf.download(["HG=F", "GC=F"], start=start_date, end=end_date, progress=False, threads=False)
+        
+        # Manejo de MultiIndex en columnas
+        if isinstance(raw_comm.columns, pd.MultiIndex):
+            commodities = raw_comm['Close']
+        else:
+            commodities = raw_comm[['Close']]
+            
+        ratio = (commodities["HG=F"] / commodities["GC=F"]).dropna()
+        
+        # Descarga de Sectores y Benchmark
+        all_tickers = list(SECTORES.values()) + [BENCHMARK]
+        raw_prices = yf.download(all_tickers, start=start_date, end=end_date, progress=False, threads=False)
+        
+        if isinstance(raw_prices.columns, pd.MultiIndex):
+            prices = raw_prices['Close']
+        else:
+            prices = raw_prices[['Close']]
+            
+        return ratio, prices.ffill()
     
-    # Descargar Sectores y Benchmark
-    all_tickers = list(SECTORES.values()) + [BENCHMARK]
-    prices = yf.download(all_tickers, start=start_date, end=end_date)['Close']
-    
-    return ratio, prices
+    except Exception as e:
+        st.error(f"Error en la descarga: {e}")
+        return pd.Series(), pd.DataFrame()
 
-# --- 4. LÓGICA DE BACKTESTING ---
+# --- 4. EJECUCIÓN Y LÓGICA ---
 ratio_ser, prices_df = get_backtest_data(years)
 
-if not prices_df.empty:
-    # Preparar datos mensuales
-    prices_m = prices_df.resample('MS').first()
-    ratio_m = ratio_ser.resample('MS').first()
-    ratio_ma = ratio_ser.rolling(window=ma_ratio).mean().resample('MS').first()
+if not prices_df.empty and not ratio_ser.empty:
+    # Cálculo de medias y remuestreo mensual
+    ratio_ma_ser = ratio_ser.rolling(window=ma_ratio).mean()
     
-    returns_m = prices_m.pct_change().shift(-1) # Rentabilidad del mes siguiente
+    # Alineamos datos: tomamos el último día de cada mes para decidir el siguiente
+    prices_m = prices_df.resample('ME').last()
+    ratio_m = ratio_ser.resample('ME').last()
+    ratio_ma_m = ratio_ma_ser.resample('ME').last()
+    
+    returns_m = prices_m.pct_change().shift(-1) # La rentabilidad que obtendremos el mes siguiente
     
     bt_results = []
     
+    # Iteramos por los meses disponibles (excepto el último)
     for i in range(len(prices_m) - 1):
-        fecha = prices_m.index[i]
+        fecha_decision = prices_m.index[i]
         
-        # 1. Determinar Régimen
-        regime = "Risk-On (Cíclico)" if ratio_m.iloc[i] > ratio_ma.iloc[i] else "Risk-Off (Defensivo)"
-        pool = CICLICOS if "Risk-On" in regime else DEFENSIVOS
+        # 1. Régimen
+        current_ratio = ratio_m.iloc[i]
+        current_ma = ratio_ma_m.iloc[i]
         
-        # 2. Seleccionar Top 3 por Momentum (retorno del último mes)
-        momentum = prices_m.pct_change().iloc[i]
-        top_3_tickers = []
+        if pd.isna(current_ma): continue
+            
+        is_cyclical = current_ratio > current_ma
+        regime = "Risk-On (Cíclico)" if is_cyclical else "Risk-Off (Defensivo)"
+        pool = CICLICOS if is_cyclical else DEFENSIVOS
         
-        # Filtrar tickers del pool actual y ordenar
-        pool_tickers = {k: v for k, v in SECTORES.items() if k in pool}
-        sorted_pool = sorted(pool_tickers.items(), key=lambda x: momentum[x[1]], reverse=True)
-        top_3_names = [x[0] for x in sorted_pool[:3]]
-        top_3_tickers = [x[1] for x in sorted_pool[:3]]
+        # 2. Momentum (Mejor retorno el mes previo a la decisión)
+        if i > 0:
+            past_return = (prices_m.iloc[i] / prices_m.iloc[i-1]) - 1
+            pool_tickers = {k: v for k, v in SECTORES.items() if k in pool}
+            # Ordenar sectores del pool por su retorno pasado
+            sorted_pool = sorted(pool_tickers.items(), key=lambda x: past_return.get(x[1], -999), reverse=True)
+            top_3_names = [x[0] for x in sorted_pool[:3]]
+            top_3_tickers = [x[1] for x in sorted_pool[:3]]
+        else:
+            # Si es el primer mes, elegimos los 3 primeros del pool por defecto
+            top_3_names = pool[:3]
+            top_3_tickers = [SECTORES[n] for n in top_3_names]
         
-        # 3. Calcular Retorno
+        # 3. Rentabilidad del mes siguiente
         ret_estrategia = returns_m[top_3_tickers].iloc[i].mean()
         ret_msci = returns_m[BENCHMARK].iloc[i]
         
         bt_results.append({
-            "Fecha": fecha,
+            "Mes Inversión": prices_m.index[i+1].strftime('%Y-%m'),
             "Régimen": regime,
-            "Sectores": ", ".join(top_3_names),
+            "Sectores Elegidos": ", ".join(top_3_names),
             "Ret. Estrategia": ret_estrategia,
             "Ret. MSCI World": ret_msci,
             "Alpha": ret_estrategia - ret_msci
         })
 
-    df_bt = pd.DataFrame(bt_results).dropna()
+    if bt_results:
+        df_bt = pd.DataFrame(bt_results)
+        
+        # Métricas principales
+        cum_est = (1 + df_bt["Ret. Estrategia"]).prod() - 1
+        cum_msci = (1 + df_bt["Ret. MSCI World"]).prod() - 1
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Acumulado Estrategia", f"{cum_est*100:.2f}%")
+        c2.metric("Acumulado MSCI World", f"{cum_msci*100:.2f}%")
+        c3.metric("Alpha Total", f"{(cum_est - cum_msci)*100:.2f}%", 
+                  delta=f"{(cum_est - cum_msci)*100:.2f}%")
 
-    # --- 5. VISUALIZACIÓN ---
-    col1, col2, col3 = st.columns(3)
-    
-    cum_est = (1 + df_bt["Ret. Estrategia"]).prod() - 1
-    cum_msci = (1 + df_bt["Ret. MSCI World"]).prod() - 1
-    
-    col1.metric("Retorno Acum. Estrategia", f"{cum_est*100:.2f}%")
-    col2.metric("Retorno Acum. MSCI World", f"{cum_msci*100:.2f}%")
-    col3.metric("Alpha Generado", f"{(cum_est - cum_msci)*100:.2f}%", delta=f"{(cum_est - cum_msci)*100:.2f}%")
+        # Gráfico
+        chart_data = pd.DataFrame({
+            "Estrategia": (1 + df_bt["Ret. Estrategia"]).cumprod() * 100,
+            "MSCI World": (1 + df_bt["Ret. MSCI World"]).cumprod() * 100
+        }, index=df_bt["Mes Inversión"])
+        st.line_chart(chart_data)
 
-    # Gráfico de evolución
-    df_bt["Estrategia_Idx"] = (1 + df_bt["Ret. Estrategia"]).cumprod() * 100
-    df_bt["MSCI_Idx"] = (1 + df_bt["Ret. MSCI World"]).cumprod() * 100
-    
-    st.subheader("Evolución de 100€ invertidos")
-    st.line_chart(df_bt.set_index("Fecha")[["Estrategia_Idx", "MSCI_Idx"]])
-
-    st.subheader("Detalle Mensual")
-    st.dataframe(df_bt.style.format({
-        "Ret. Estrategia": "{:.2%}",
-        "Ret. MSCI World": "{:.2%}",
-        "Alpha": "{:.2%}"
-    }), use_container_width=True)
+        st.subheader("Bitácora Mensual de Rotación")
+        st.dataframe(df_bt.style.background_gradient(subset=['Alpha'], cmap='RdYlGn'), use_container_width=True)
+    else:
+        st.warning("No hay suficientes datos para el periodo y media móvil seleccionados.")
 else:
-    st.error("No se pudieron descargar los datos. Verifica la conexión o los tickers.")
-
+    st.error("Error al obtener datos de Yahoo Finance. Intenta reducir los años de backtesting.")
