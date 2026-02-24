@@ -1,30 +1,11 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
-from scipy.interpolate import make_interp_spline
-import base64
-import os
-from PIL import Image
+import requests
 import io
 
-# --- 1. PARÁMETROS POR DEFECTO DEL PROGRAMA ---
-DEF_RS_SMOOTH = 20
-DEF_PERIODO_X = 63
-DEF_PERIODO_Y = 21
-DEF_TAIL_LENGTH = 5  
-DEF_UI_PENALTY = 3.0
-DEF_VELOCITY_WEIGHT = 30.0
-
-# Nuevos parámetros progresivos
-DEF_VEL_EXP = 1.2
-DEF_UI_THRESHOLD = 2.5
-DEF_UI_EXP = 1.5
-
-# --- 2. CONFIGURACIÓN VISUAL ---
-st.set_page_config(layout="wide", page_title="PENGUIN PORTFOLIO PRO", page_icon="🐧")
+# --- 1. CONFIGURACIÓN VISUAL ---
+st.set_page_config(layout="wide", page_title="MSCI WORLD TRACKER PRO", page_icon="🌍")
 
 st.markdown("""
     <style>
@@ -53,507 +34,133 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. CABECERA COMPACTA ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
+# --- 2. CABECERA COMPACTA ---
 col_h1, col_h2 = st.columns([1, 25])
 with col_h1:
-    p_path = os.path.join(BASE_DIR, "pinguino.png")
-    if os.path.exists(p_path): st.image(p_path, width=32)
+    st.markdown("<h1>🌍</h1>", unsafe_allow_html=True)
 with col_h2: 
-    st.markdown('<p class="main-title">PENGUIN PORTFOLIO</p>', unsafe_allow_html=True)
+    st.markdown('<p class="main-title">PENGUIN MSCI WORLD TRACKER</p>', unsafe_allow_html=True)
     st.markdown('<p class="alberto-sofia">Sofía y Alberto 2026</p>', unsafe_allow_html=True)
 
-# --- 4. CONSTANTES Y ASSETS ---
-BENCHMARK = "MWEQ.DE"
-MY_PORTFOLIO = ["LCUJ.DE", "B41J.DE", "XDWI.DE", "XDW0.DE", "XDWM.DE", "LBRA.DE"]
-PIRANHA_ETFS = ["SXR8.DE", "XDEW.DE", "XDEE.DE", "IBCF.DE"]
+st.divider()
 
-ASSETS = [
-    ("AGGREGATE HDG", "EME", "XEMB.DE", "BONDS.PNG", "EME.PNG"),
-    ("AGGREGATE HDG", "WRL", "DBZB.DE", "BONDS.PNG", "WRL.PNG"),
-    ("CASH", "EUR", "YCSH.DE", "CASH.PNG", "EUR.PNG"),
-    ("CORPORATE BONDS", "WRL", "D5BG.DE", "BONDS.PNG", "WRL.PNG"),
-    ("CORPORATE HIGH YIELD BONDS", "WRL", "XHYA.DE", "BONDS.PNG", "WRL.PNG"),
-    ("EUROZONE GOVERNMENT BOND 1-3", "EUR", "DBXP.DE", "BONDS.PNG", "EUR.PNG"),
-    ("EUROZONE GOVERNMENT BOND 10-15", "EUR", "LYQ6.DE", "BONDS.PNG", "EUR.PNG"),
-    ("EUROZONE GOVERNMENT BOND 15+", "EUR", "LYXF.DE", "BONDS.PNG", "EUR.PNG"),
-    ("EUROZONE GOVERNMENT BOND 3-5", "EUR", "LYQ3.DE", "BONDS.PNG", "EUR.PNG"),
-    ("EUROZONE GOVERNMENT BOND 7-10", "EUR", "LYXD.DE", "BONDS.PNG", "EUR.PNG"),
-    ("JAPAN AGGREGATE HDG", "JPN", "CEB2.DE", "BONDS.PNG", "JAPAN.PNG"),
-    ("TIPS", "EUR", "XEIN.DE", "BONDS.PNG", "EUR.PNG"),
-    ("TIPS HDG", "USA", "IBC5.DE", "BONDS.PNG", "USA.PNG"),
-    ("TREASURY AGGREGATE", "USA", "VAGT.DE", "BONDS.PNG", "USA.PNG"),
-    ("AGRICULTURE", "COM", "AIGA.MI", "FARM.PNG", "COM.PNG"),
-    ("BITCOIN", "COM", "IB1T.DE", "CRYPTO.PNG", "COM.PNG"),
-    ("BLOOMBERG COMMODITY", "COM", "CMOE.MI", "COM.PNG", "COM.PNG"),
-    ("GOLD", "COM", "8PSG.DE", "GOLD.PNG", "COM.PNG"),
-    ("GOLD HDG", "COM", "XGDE.DE", "GOLD.PNG", "COM.PNG"),
-    ("STRATEGIC METALS", "COM", "WENH.DE", "METALS.PNG", "COM.PNG"),
-    ("HIGH YIELD", "EME", "EUNY.DE", "HIGH YIELD.PNG", "EME.PNG"),
-    ("HIGH YIELD", "EUR", "XZDZ.DE", "HIGH YIELD.PNG", "EUR.PNG"),
-    ("HIGH YIELD", "USA", "XDND.DE", "HIGH YIELD.PNG", "USA.PNG"),
-    ("HIGH YIELD", "WRL", "XZDW.DE", "HIGH YIELD.PNG", "WRL.PNG"),
-    ("LOW VOLATILITY", "EME", "EUNZ.DE", "VOLATILITY.PNG", "EME.PNG"),
-    ("LOW VOLATILITY", "EUR", "ZPRL.DE", "VOLATILITY.PNG", "EUR.PNG"),
-    ("LOW VOLATILITY", "USA", "SPY1.DE", "VOLATILITY.PNG", "USA.PNG"),
-    ("LOW VOLATILITY", "WRL", "CSY9.DE", "VOLATILITY.PNG", "WRL.PNG"),
-    ("MOMENTUM", "EME", "EGEE.DE", "MOMENTUM.PNG", "EME.PNG"),
-    ("MOMENTUM", "EUR", "CEMR.DE", "MOMENTUM.PNG", "EUR.PNG"),
-    ("MOMENTUM", "USA", "QDVA.DE", "MOMENTUM.PNG", "USA.PNG"),
-    ("MOMENTUM", "WRL", "IS3R.DE", "MOMENTUM.PNG", "WRL.PNG"),
-    ("QUALITY", "EME", "JREM.DE", "QUALITY.PNG", "EME.PNG"),
-    ("QUALITY", "EUR", "CEMQ.DE", "QUALITY.PNG", "EUR.PNG"),
-    ("QUALITY", "USA", "QDVB.DE", "QUALITY.PNG", "USA.PNG"),
-    ("QUALITY", "WRL", "IS3Q.DE", "QUALITY.PNG", "WRL.PNG"),
-    ("SIZE", "EME", "SPYX.DE", "SIZE.PNG", "EME.PNG"),
-    ("SIZE", "EUR", "ZPRX.DE", "SIZE.PNG", "EUR.PNG"),
-    ("SIZE", "USA", "ZPRV.DE", "SIZE.PNG", "USA.PNG"),
-    ("SIZE", "WRL", "IUSN.DE", "SIZE.PNG", "WRL.PNG"),
-    ("SIZE", "JPN", "IUS4.DE", "SIZE.PNG", "JAPAN.PNG"),
-    ("VALUE", "EME", "5MVL.DE", "VALUE.PNG", "EME.PNG"),
-    ("VALUE", "EUR", "CEMS.DE", "VALUE.PNG", "EUR.PNG"),
-    ("VALUE", "USA", "QDVI.DE", "VALUE.PNG", "USA.PNG"),
-    ("VALUE", "WRL", "IS3S.DE", "VALUE.PNG", "WRL.PNG"),
-    ("AEX 25", "EUR", "IAEA.AS", "INDICEP.PNG", "EUR.PNG"),
-    ("CAC 40", "EUR", "GC40.DE", "INDICEP.PNG", "EUR.PNG"),
-    ("CSI 300", "CHN", "XCHA.DE", "INDICEP.PNG", "CHINA.PNG"),
-    ("DAX 40", "EUR", "EXS1.DE", "INDICEP.PNG", "EUR.PNG"),
-    ("DOW JONES INDUSTRIAL", "USA", "SXRU.DE", "INDICEP.PNG", "USA.PNG"),
-    ("FTSE 100", "EUR", "CEB4.DE", "INDICEP.PNG", "EUR.PNG"),
-    ("FTSE KOREA", "EME", "FLXK.DE", "INDICEP.PNG", "EME.PNG"),
-    ("FTSE MIB", "EUR", "SXRY.DE", "INDICEP.PNG", "EUR.PNG"),
-    ("IBEX 35", "EUR", "AMES.DE", "INDICEP.PNG", "EUR.PNG"),
-    ("MSCI ARABIA SAUDITA", "EME", "IUSS.DE", "INDICEP.PNG", "EME.PNG"),
-    ("MSCI AUSTRALIA", "WRL", "IBC6.DE", "INDICEP.PNG", "WRL.PNG"),
-    ("MSCI BRASIL", "EME", "LBRA.DE", "INDICEP.PNG", "EME.PNG"),
-    ("MSCI CANADA", "WRL", "SXR2.DE", "INDICEP.PNG", "WRL.PNG"),
-    ("MSCI CHINA", "CHN", "ICGA.DE", "INDICEP.PNG", "CHINA.PNG"),
-    ("MSCI HONG KONG", "CHN", "HKDE.AS", "INDICEP.PNG", "CHINA.PNG"),
-    ("MSCI INDIA", "EME", "QDV5.DE", "INDICEP.PNG", "EME.PNG"),
-    ("MSCI INDONESIA", "EME", "H4Z7.DE", "INDICEP.PNG", "EME.PNG"),
-    ("MSCI JAPAN HDG", "JPN", "IBCG.DE", "INDICEP.PNG", "JAPAN.PNG"),
-    ("MSCI JAPAN", "JPN", "LCUJ.DE", "INDICEP.PNG", "JAPAN.PNG"),
-    ("MSCI MALAYSIA", "EME", "XCS3.DE", "INDICEP.PNG", "EME.PNG"),
-    ("MSCI MEXICO", "EME", "D5BI.DE", "INDICEP.PNG", "EME.PNG"),
-    ("MSCI PHILIPPINES", "EME", "XPQP.DE", "INDICEP.PNG", "EME.PNG"),
-    ("MSCI POLAND", "EUR", "IBCJ.DE", "INDICEP.PNG", "EUR.PNG"),
-    ("MSCI SINGAPORE", "EME", "XBAS.DE", "INDICEP.PNG", "EME.PNG"),
-    ("MSCI SUDÁFRICA", "EME", "IBC4.DE", "INDICEP.PNG", "EME.PNG"),
-    ("MSCI SWITZERLAND CHF", "EUR", "SW2CHB.SW", "INDICEP.PNG", "EUR.PNG"),
-    ("MSCI TAIWAN", "EME", "DBX5.DE", "INDICEP.PNG", "EME.PNG"),
-    ("MSCI THAILANDIA", "EME", "XCS4.DE", "INDICEP.PNG", "EME.PNG"),
-    ("MSCI TURQUÍA", "EUR", "LTUR.DE", "INDICEP.PNG", "EUR.PNG"),
-    ("NASDAQ 100", "USA", "SXRV.DE", "INDICEP.PNG", "USA.PNG"),
-    ("NASDAQ 100 HDG", "USA", "NQSE.DE", "INDICEP.PNG", "USA.PNG"),
-    ("NIKKEI 225", "JPN", "XDJP.DE", "INDICEP.PNG", "JAPAN.PNG"),
-    ("RUSSELL 2000", "USA", "ZPRR.DE", "INDICEP.PNG", "USA.PNG"),
-    ("S&P 500", "USA", "SXR8.DE", "INDICEP.PNG", "USA.PNG"),
-    ("S&P 500 EW", "USA", "XDEW.DE", "INDICEP.PNG", "USA.PNG"),
-    ("S&P 500 EW HDG", "USA", "XDEE.DE", "INDICEP.PNG", "USA.PNG"),
-    ("S&P 500 HDG", "USA", "IBCF.DE", "INDICEP.PNG", "USA.PNG"),
-    ("S&P 600", "USA", "SMLK.DE", "INDICEP.PNG", "USA.PNG"),
-    ("TOPIX", "WRL", "TPXE.PA", "INDICEP.PNG", "WRL.PNG"),
-    ("ACWI", "ALL", "VWCE.DE", "INDICES.PNG", "ALL.PNG"),
-    ("ACWI HDG", "ALL", "SPP1.DE", "INDICES.PNG", "ALL.PNG"),
-    ("MSCI AFRICA", "EME", "XMKA.DE", "INDICES.PNG", "EME.PNG"),
-    ("MSCI EMERGING ASIA", "EME", "AMEA.DE", "INDICES.PNG", "EME.PNG"),
-    ("MSCI EMERGING EX-CHINA", "EME", "EMXC.DE", "INDICES.PNG", "EME.PNG"),
-    ("MSCI EMERGING MARKETS", "EME", "IS3N.DE", "INDICES.PNG", "EME.PNG"),
-    ("MSCI LATINOAMERICA", "EME", "DBX3.DE", "INDICES.PNG", "EME.PNG"),
-    ("MSCI NORDIC", "EUR", "XDN0.DE", "INDICES.PNG", "EUR.PNG"),
-    ("MSCI PACIFIC-EX JAPAN", "EME", "18MM.DE", "INDICES.PNG", "EME.PNG"),
-    ("MSCI WORLD", "WRL", "EUNL.DE", "INDICES.PNG", "WRL.PNG"),
-    ("MSCI WORLD EW", "WRL", "MWEQ.DE", "INDICES.PNG", "WRL.PNG"),
-    ("MSCI WORLD EX-USA", "WRL", "EXUS.DE", "INDICES.PNG", "WRL.PNG"),
-    ("MSCI WORLD HDG", "WRL", "IBCH.DE", "INDICES.PNG", "WRL.PNG"),
-    ("STOXX 50", "EUR", "SXRT.DE", "INDICES.PNG", "EUR.PNG"),
-    ("STOXX 600", "EUR", "LYP6.DE", "INDICES.PNG", "EUR.PNG"),
-    ("COMMUNICATION SERVICES", "EUR", "SPYT.DE", "COMMUNICATIONS.PNG", "EUR.PNG"),
-    ("COMMUNICATION SERVICES", "USA", "IU5C.DE", "COMMUNICATIONS.PNG", "USA.PNG"),
-    ("COMMUNICATION SERVICES", "WRL", "TELW.PA", "COMMUNICATIONS.PNG", "WRL.PNG"),
-    ("CONSUMER DISCRETIONARY", "EUR", "SPYR.DE", "DISCRETIONARY.PNG", "EUR.PNG"),
-    ("CONSUMER DISCRETIONARY", "USA", "QDVK.DE", "DISCRETIONARY.PNG", "USA.PNG"),
-    ("CONSUMER DISCRETIONARY", "WRL", "WELJ.DE", "DISCRETIONARY.PNG", "WRL.PNG"),
-    ("CONSUMER STAPLES", "EUR", "SPYC.DE", "STAPLES.PNG", "EUR.PNG"),
-    ("CONSUMER STAPLES", "USA", "2B7D.DE", "STAPLES.PNG", "USA.PNG"),
-    ("CONSUMER STAPLES", "WRL", "WELW.DE", "STAPLES.PNG", "WRL.PNG"),
-    ("ENERGY", "EUR", "SPYN.DE", "ENERGY.PNG", "EUR.PNG"),
-    ("ENERGY", "USA", "QDVF.DE", "ENERGY.PNG", "USA.PNG"),
-    ("ENERGY", "WRL", "XDW0.DE", "ENERGY.PNG", "WRL.PNG"),
-    ("FINANCIALS", "EUR", "SPYZ.DE", "FINANCIALS.PNG", "EUR.PNG"),
-    ("FINANCIALS", "USA", "QDVH.DE", "FINANCIALS.PNG", "USA.PNG"),
-    ("FINANCIALS", "WRL", "WF1E.DE", "FINANCIALS.PNG", "WRL.PNG"),
-    ("HEALTH CARE", "EUR", "SPYH.DE", "HEALTH CARE.PNG", "EUR.PNG"),
-    ("HEALTH CARE", "USA", "QDVG.DE", "HEALTH CARE.PNG", "USA.PNG"),
-    ("HEALTH CARE", "WRL", "WELS.DE", "HEALTH CARE.PNG", "WRL.PNG"),
-    ("INDUSTRIALS", "EUR", "ESIN.DE", "INDUSTRIALS.PNG", "EUR.PNG"),
-    ("INDUSTRIALS", "USA", "2B7C.DE", "INDUSTRIALS.PNG", "USA.PNG"),
-    ("INDUSTRIALS", "WRL", "XDWI.DE", "INDUSTRIALS.PNG", "WRL.PNG"),
-    ("MATERIALS", "EUR", "SPYP.DE", "MATERIALS.PNG", "EUR.PNG"),
-    ("MATERIALS", "USA", "2B7B.DE", "MATERIALS.PNG", "USA.PNG"),
-    ("MATERIALS", "WRL", "XDWM.DE", "MATERIALS.PNG", "WRL.PNG"),
-    ("REAL ESTATE", "EUR", "IPRE.DE", "REIT.PNG", "EUR.PNG"),
-    ("REAL ESTATE", "USA", "IQQ7.DE", "REIT.PNG", "USA.PNG"),
-    ("REAL ESTATE", "WRL", "SPY2.DE", "REIT.PNG", "WRL.PNG"),
-    ("TECHNOLOGY", "CHN", "CBUK.DE", "TECHNOLOGY.PNG", "CHINA.PNG"),
-    ("TECHNOLOGY", "EME", "EMQQ.DE", "TECHNOLOGY.PNG", "EME.PNG"),
-    ("TECHNOLOGY", "EUR", "SPYK.DE", "TECHNOLOGY.PNG", "EUR.PNG"),
-    ("TECHNOLOGY", "USA", "QDVE.DE", "TECHNOLOGY.PNG", "USA.PNG"),
-    ("TECHNOLOGY", "WRL", "WELU.DE", "TECHNOLOGY.PNG", "WRL.PNG"),
-    ("TECHNOLOGY", "EME", "H41X.DE", "TECHNOLOGY.PNG", "INDIA.PNG"),
-    ("UTILITIES", "EUR", "SPYU.DE", "UTILITIES.PNG", "EUR.PNG"),
-    ("UTILITIES", "USA", "2B7A.DE", "UTILITIES.PNG", "USA.PNG"),
-    ("UTILITIES", "WRL", "WELD.DE", "UTILITIES.PNG", "WRL.PNG"),
-    ("AGEING POPULATION", "ALL", "2B77.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("AGRIBUSINESS", "ALL", "ISAG.MI", "THEMATIC.PNG", "ALL.PNG"),
-    ("AI ADOPTERS & APPLICATIONS", "ALL", "AIAA.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("AI INFRASTRUCTURE", "ALL", "AIFS.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("ARK INNOVATION", "WRL", "ARXK.DE", "THEMATIC.PNG", "WRL.PNG"),
-    ("CLEAN ENERGY TRANSITION", "ALL", "Q8Y0.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("CLOUD COMPUTING", "USA", "SKYE.AS", "THEMATIC.PNG", "USA.PNG"),
-    ("CYBER SECURITY", "WRL", "USPY.DE", "THEMATIC.PNG", "WRL.PNG"),
-    ("DATA CENTER", "ALL", "V9N.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("DIGITAL ENTERTAINMENT & EDUCATION", "ALL", "CBUN.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("DIGITAL PAYMENTS", "ALL", "DPGA.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("ELECTRIC VEHICLES & DRIVING TECH", "ALL", "IEVD.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("EUROPE DEFENSE", "EUR", "EDFS.DE", "THEMATIC.PNG", "EUR.PNG"),
-    ("EUROPEAN INFRASTRUCTURE", "EUR", "B41J.DE", "THEMATIC.PNG", "EUR.PNG"),
-    ("GLOBAL BLOCKCHAIN", "ALL", "BNXG.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("GLOBAL DEFENSE", "ALL", "4MMR.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("GLOBAL HYDROGEN", "ALL", "AMEE.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("GLOBAL INFRASTRUCTURE", "ALL", "CBUX.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("GLOBAL INVESTORS TRAVEL", "ALL", "7RIP.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("GLOBAL LUXURY", "ALL", "GLUX.MI", "THEMATIC.PNG", "ALL.PNG"),
-    ("GLOBAL TIMBER & FORESTRY", "ALL", "IUSB.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("HEALTHCARE INNOVATION", "ALL", "2B78.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("LITHIUM & BATTERY TECHNOLOGIES", "ALL", "LI7U.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("MEDICAL ROBOTICS", "ALL", "CIB0.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("METAVERSE", "ALL", "CBUV.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("MORNINGSTAR GLOBAL WIDE MOAT", "ALL", "VVGM.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("MORNINGSTAR US WIDE MOAT", "USA", "GMVM.DE", "THEMATIC.PNG", "USA.PNG"),
-    ("MSCI MILENNIALS", "ALL", "GENY.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("MSCI WATER", "WRL", "WATC.MI", "THEMATIC.PNG", "WRL.PNG"),
-    ("NASDAQ NEXT GENERATION 100", "USA", "EQQJ.DE", "THEMATIC.PNG", "USA.PNG"),
-    ("NASDAQ US BIOTECHNOLOGY", "USA", "2B70.DE", "THEMATIC.PNG", "USA.PNG"),
-    ("OIL SERVICES", "WRL", "V0IH.DE", "THEMATIC.PNG", "WRL.PNG"),
-    ("QUANTUM COMPUTING", "ALL", "QUTM.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("RARE EARTH & STRATEGIC METALS", "ALL", "VVMX.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("ROBOTICS & AI", "WRL", "GOAI.DE", "THEMATIC.PNG", "WRL.PNG"),
-    ("S&P 500 TOP 20", "USA", "IS20.DE", "THEMATIC.PNG", "USA.PNG"),
-    ("SEMICONDUCTOR", "ALL", "VVSM.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("SOLAR ENERGY", "ALL", "S0LR.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("SPACE INNOVATORS", "ALL", "JEDI.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("SUSTAINABLE FUTURE OF FOOD", "ALL", "RIZF.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("URANIUM & NUCLEAR TECHNOLOGIES", "ALL", "NUKL.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("VIDEO GAMING & ESPORTS", "ALL", "ESP0.DE", "THEMATIC.PNG", "ALL.PNG"),
-    ("WEB 3.0", "WRL", "M37R.DE", "THEMATIC.PNG", "WRL.PNG")
-]
-
-# --- 5. SERVICIOS ---
-_img_cache = {}
-TRANSPARENT_1X1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
-
-def get_img_b64(filename):
-    if not filename: return TRANSPARENT_1X1
-    if filename in _img_cache: return _img_cache[filename]
+# --- 3. MOTOR DE EXTRACCIÓN DE DATOS (BLACKROCK CSV) ---
+@st.cache_data(ttl=86400) # Cachear la lista por 1 día
+def obtener_empresas_msci_world():
+    url = "https://www.ishares.com/us/products/239696/ishares-msci-world-etf/1467271812596.ajax?fileType=csv&fileName=URTH_holdings&dataType=fund"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"
+    }
     
-    actual_filename = filename
     try:
-        for f in os.listdir(BASE_DIR):
-            if f.lower() == filename.lower():
-                actual_filename = f
-                break
-    except Exception:
-        pass
+        response = requests.get(url, headers=headers)
+        # BlackRock suele poner 9 líneas de metadatos antes de la tabla
+        df = pd.read_csv(io.StringIO(response.text), skiprows=9)
         
-    path = os.path.join(BASE_DIR, actual_filename)
-    if not os.path.exists(path):
-        return TRANSPARENT_1X1 
+        # Limpieza básica
+        df = df.dropna(subset=['Ticker', 'Sector'])
+        df = df[df['Asset Class'] == 'Equity']
         
-    try:
-        with Image.open(path) as img:
-            img = img.convert("RGBA")
+        # Adaptación de columnas para mantener la lógica anterior
+        df = df.rename(columns={'Ticker': 'Symbol', 'Name': 'Security', 'Sector': 'GICS Sector'})
+        
+        # Limpieza de Tickers para Yahoo Finance (Reemplazar puntos por guiones, ej. BRK.B -> BRK-B)
+        df['Symbol'] = df['Symbol'].astype(str).str.replace('.', '-', regex=False)
+        
+        return df[['Symbol', 'Security', 'GICS Sector']]
+    except Exception as e:
+        st.error(f"Error de conexión con iShares: {e}")
+        return pd.DataFrame(columns=['Symbol', 'Security', 'GICS Sector'])
+
+@st.cache_data(ttl=3600) # Cachear precios por 1 hora
+def descargar_precios(tickers):
+    data = yf.download(tickers, period="4mo", auto_adjust=True, progress=False)['Close']
+    return data
+
+# --- 4. LÓGICA DE INTERFAZ Y CÁLCULO ---
+df_msci = obtener_empresas_msci_world()
+
+if df_msci.empty:
+    st.warning("No se pudieron cargar los datos del MSCI World. Inténtalo de nuevo más tarde.")
+else:
+    sectores = sorted(df_msci['GICS Sector'].unique())
+    
+    col_sel, col_empty = st.columns([1, 3])
+    with col_sel:
+        sector_elegido = st.selectbox("🎯 Selecciona un Sector global:", sectores)
+    
+    empresas_sector = df_msci[df_msci['GICS Sector'] == sector_elegido]
+    tickers_sector = empresas_sector['Symbol'].tolist()
+    nombres_dict = dict(zip(empresas_sector['Symbol'], empresas_sector['Security']))
+    
+    with st.spinner(f"Sincronizando {len(tickers_sector)} empresas globales de {sector_elegido}... (Las acciones no estadounidenses podrían no cargar sin su sufijo de país)"):
+        precios = descargar_precios(tickers_sector)
+    
+    if not precios.empty:
+        resultados = []
+        precios = precios.ffill()
+        
+        # yfinance devuelve un DataFrame distinto si es 1 ticker vs múltiples
+        if isinstance(precios, pd.Series):
+            precios = precios.to_frame(name=tickers_sector[0])
             
-            if filename.lower() == "eme.png":
-                img.thumbnail((96, 96), Image.Resampling.LANCZOS)
-                bg = Image.new("RGBA", (128, 128), (255, 255, 255, 0))
-                offset = ((128 - img.width) // 2, (128 - img.height) // 2)
-                bg.paste(img, offset)
-                img = bg
-            else:
-                img.thumbnail((128, 128), Image.Resampling.LANCZOS)
+        for ticker in tickers_sector:
+            if ticker not in precios.columns:
+                continue
                 
-            buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
-            _img_cache[filename] = b64
-            return b64
-    except:
-        return TRANSPARENT_1X1
-
-def get_rrg_pts(ticker_df, bench_df, rs_smooth, periodo_x, periodo_y):
-    rs = (ticker_df / bench_df) * 100
-    rs_sm = rs.ewm(span=rs_smooth, adjust=False).mean()
-    m_l, s_l = rs_sm.rolling(periodo_x).mean(), rs_sm.rolling(periodo_x).std()
-    rs_ratio = ((rs_sm - m_l) / s_l.replace(0, 1)) * 10 + 100
-    rs_mom_raw = rs_sm.pct_change(periods=periodo_y) * 100
-    m_s, s_s = rs_mom_raw.rolling(periodo_y).mean(), rs_mom_raw.rolling(periodo_y).std()
-    rs_mom = ((rs_mom_raw - m_s) / s_s.replace(0, 1)) * 10 + 100
-    return rs_ratio, rs_mom
-
-@st.cache_data(ttl=600)
-def load_data_robust(tickers):
-    all_data = []
-    chunk_size = 45
-    for i in range(0, len(tickers), chunk_size):
-        chunk = tickers[i:i + chunk_size]
-        data = yf.download(chunk, period="2y", auto_adjust=True, progress=False)['Close']
-        all_data.append(data)
-    return pd.concat(all_data, axis=1)
-
-# --- 6. PESTAÑAS Y FLUJO PRINCIPAL ---
-tab_app, tab_params, tab_manual = st.tabs(["📊 PORTFOLIO", "⚙️ PARÁMETROS", "📖 MANUAL TÉCNICO"])
-
-with tab_params:
-    st.markdown("### Configuración del Motor RRG")
-    with st.form("parametros_form"):
-        st.subheader("Sensibilidad del Modelo")
-        col1, col2, col3 = st.columns(3)
-        with col1: RS_SMOOTH = st.number_input("Suavizado RS (Periodos)", min_value=1, max_value=100, value=DEF_RS_SMOOTH, step=1)
-        with col2: PERIODO_X = st.number_input("Periodo Eje X (STR)", min_value=10, max_value=252, value=DEF_PERIODO_X, step=5)
-        with col3: PERIODO_Y = st.number_input("Periodo Eje Y (MOM)", min_value=5, max_value=100, value=DEF_PERIODO_Y, step=1)
-
-        st.subheader("Configuración del Score Unificado (Lineal)")
-        col4, col5 = st.columns(2)
-        with col4: UI_PENALTY = st.number_input("Multiplicador Penalización UI", min_value=0.0, max_value=10.0, value=DEF_UI_PENALTY, step=0.5)
-        with col5: VEL_WEIGHT = st.number_input("Bono por Velocidad (%)", min_value=0.0, max_value=100.0, value=DEF_VELOCITY_WEIGHT, step=5.0)
-
-        st.subheader("Configuración Progresiva (No Lineal)")
-        col6, col7, col8 = st.columns(3)
-        with col6: VEL_EXP = st.number_input("Exponente Velocidad (Sprints)", min_value=1.0, max_value=3.0, value=DEF_VEL_EXP, step=0.1)
-        with col7: UI_THRESHOLD = st.number_input("Umbral Ulcer Index (Riesgo)", min_value=0.5, max_value=10.0, value=DEF_UI_THRESHOLD, step=0.5)
-        with col8: UI_EXP = st.number_input("Exponente Penalización UI", min_value=1.0, max_value=3.0, value=DEF_UI_EXP, step=0.1)
-
-        st.subheader("Gráfico")
-        TAIL_LENGTH = st.number_input("Puntos de la cola (Saltos de 5 días)", min_value=3, max_value=20, value=DEF_TAIL_LENGTH, step=1)
-
-        submit_button = st.form_submit_button("Actualizar Parámetros", use_container_width=True)
-
-with tab_app:
-    t_list = list(set([a[2] for a in ASSETS] + [BENCHMARK]))
-
-    with st.spinner("SINCRONIZANDO PORTFOLIO (178 ACTIVOS)..."):
-        raw_prices = load_data_robust(t_list)
-
-    if not raw_prices.empty:
-        bench_p = raw_prices[BENCHMARK]
-        res_raw, rrg_hist = [], {}
-
-        for name, reg, tick, isec, ireg in ASSETS:
-            if tick not in raw_prices.columns: continue
-            
-            r_ser, m_ser = get_rrg_pts(raw_prices[tick], bench_p, RS_SMOOTH, PERIODO_X, PERIODO_Y)
-            
-            if r_ser.isna().all() or len(r_ser) < 30: continue
-
-            pts = []
-            for d in range(0, TAIL_LENGTH * 5, 5):
-                idx = -(d + 1)
-                if abs(idx) <= len(r_ser):
-                    pts.append((float(r_ser.iloc[idx]), float(m_ser.iloc[idx])))
-
-            if not pts: continue
-
-            # Coordenadas relativas al centro (0,0)
-            str_val = pts[0][0] - 100
-            mom_val = pts[0][1] - 100
-            
-            # --- Cálculo de Velocidad ---
-            velocity = 0.0
-            if len(pts) > 1:
-                # Distancia entre la cabeza actual y el punto de hace 5 días
-                velocity = np.sqrt((pts[0][0] - pts[1][0])**2 + (pts[0][1] - pts[1][1])**2)
-
-            # --- Cálculo del Índice Ulcer ---
-            prices_x = raw_prices[tick].dropna().tail(PERIODO_X)
-            ulcer_index = 0.0
-            if len(prices_x) > 1:
-                roll_max = prices_x.cummax()
-                drawdowns = ((prices_x - roll_max) / roll_max) * 100
-                ulcer_index = np.sqrt(np.mean(drawdowns**2))
-
-            # --- SCORE MAESTRO UNIFICADO (PROGRESIVO) ---
-            base_score = str_val + (1.618 * mom_val)
-            
-            # 1. Bono de velocidad progresivo
-            vel_bonus = (velocity ** VEL_EXP) * (VEL_WEIGHT / 100)
-            
-            # 2. Penalización de riesgo progresiva (umbral de estrés)
-            if ulcer_index <= UI_THRESHOLD:
-                ui_penalty = ulcer_index * UI_PENALTY
-            else:
-                ui_penalty = (ulcer_index ** UI_EXP) * UI_PENALTY
-            
-            final_score = base_score + vel_bonus - ui_penalty
-
-            ret1d = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-2]) - 1) * 100
-            ret3m = ((raw_prices[tick].iloc[-1] / raw_prices[tick].iloc[-63]) - 1) * 100 if len(raw_prices[tick]) >= 63 else 0
-
-            # Determinación de fase únicamente para visualización
-            if str_val >= 0 and mom_val >= 0:
-                pos_str = "🟢 Leading"
-            elif str_val < 0 and mom_val >= 0:
-                pos_str = "🔵 Improving"
-            elif str_val >= 0 and mom_val < 0:
-                pos_str = "🟡 Weakening"
-            else:
-                pos_str = "🔴 Lagging"
-
-            res_raw.append({
-                "tick": tick, "name": name, "reg": reg, "isec": isec, "ireg": ireg,
-                "score": final_score, "str": str_val, "mom": mom_val,
-                "r1d": ret1d, "r3m": ret3m, "pos_str": pos_str
-            })
-            rrg_hist[tick] = pts
-
-        final_rows = []
-        for r in res_raw:
-            p_ic = "pinguino.png" if r['tick'] in MY_PORTFOLIO else "PIRANHA.png" if r['tick'] in PIRANHA_ETFS else None
-
-            final_rows.append({
-                "Ver": (r['tick'] in MY_PORTFOLIO), 
-                "Img_S": get_img_b64(r['isec']), 
-                "Img_R": get_img_b64(r['ireg']),
-                "Img_P": get_img_b64(p_ic),
-                "Ticker": r['tick'], "Nombre": r['name'], "Score": round(r['score'], 2),
-                "STR": round(r['str'], 2), "MOM": round(r['mom'], 2),
-                "% Hoy": round(r['r1d'], 2), "% 3M": round(r['r3m'], 2),
-                "POS": r['pos_str']
-            })
-
-        # Ordenar puramente por el Score Maestro Unificado descendente
-        df = pd.DataFrame(final_rows).sort_values(by="Score", ascending=False).reset_index(drop=True)
-        df.insert(1, "#", range(1, len(df) + 1))
-
-        conf = {
-            "Ver": st.column_config.CheckboxColumn("Ver"), 
-            "Img_S": st.column_config.ImageColumn("Sec", width="small"),
-            "Img_R": st.column_config.ImageColumn("Reg", width="small"), 
-            "Img_P": st.column_config.ImageColumn("👤", width="small"),
-            "Nombre": st.column_config.TextColumn("Nombre", width=280),
-            "% Hoy": st.column_config.NumberColumn("% Hoy", format="%.2f%%"),
-            "% 3M": st.column_config.NumberColumn("% 3M", format="%.2f%%"),
-        }
-        
-        v_cols = ["Ver", "#", "Img_S", "Img_R", "Img_P", "Ticker", "Nombre", "Score", "% Hoy", "% 3M", "STR", "MOM", "POS"]
-        
-        edit_df = st.data_editor(df, hide_index=True, column_order=v_cols, column_config=conf,
-                                 disabled=[c for c in v_cols if c != "Ver"], height=550)
-
-        plot_t = edit_df[edit_df["Ver"] == True]["Ticker"].tolist()
-        st.divider()
-        if plot_t:
-            fig, ax = plt.subplots(figsize=(10, 8))
-            all_x, all_y = [], []
-            for t in plot_t:
-                pts_raw = rrg_hist.get(t, [])
-                xs = np.array([p[0] - 100 for p in pts_raw][::-1])
-                ys = np.array([p[1] - 100 for p in pts_raw][::-1])
-                all_x.extend(xs); all_y.extend(ys)
-
-                dot_color = None
+            serie = precios[ticker].dropna()
+            if len(serie) < 51: 
+                continue
                 
-                if len(xs) >= 3:
-                    tr = np.arange(len(xs))
-                    td = np.linspace(0, len(xs) - 1, 100)
-                    line = ax.plot(make_interp_spline(tr, xs, k=2)(td), make_interp_spline(tr, ys, k=2)(td), lw=1.5, alpha=0.7)[0]
-                    dot_color = line.get_color()
-
-                if dot_color:
-                    ax.scatter(xs[:-1], ys[:-1], s=25, color=dot_color, alpha=0.4)
-                    ax.scatter(xs[-1], ys[-1], s=160, color=dot_color, edgecolors='white', linewidth=1.5, zorder=5)
-                else:
-                    sc = ax.scatter(xs[:-1], ys[:-1], s=25, alpha=0.4)
-                    dot_color = sc.get_facecolors()[0]
-                    ax.scatter(xs[-1], ys[-1], s=160, color=dot_color, edgecolors='white', linewidth=1.5, zorder=5)
-                    
-                ax.text(xs[-1], ys[-1], f"  {t}", fontsize=9, fontweight='bold', va='center')
-
-            ax.axhline(0, c='#CCCCCC', lw=1, zorder=1)
-            ax.axvline(0, c='#CCCCCC', lw=1, zorder=1)
+            precio_actual = float(serie.iloc[-1])
             
-            limit = max([abs(val) for val in all_x + all_y] + [10]) * 1.3
-            ax.set_xlim(-limit, limit); ax.set_ylim(-limit, limit)
+            # Cálculo de retornos (días hábiles)
+            ret_1d = ((precio_actual / float(serie.iloc[-2])) - 1) * 100
+            ret_5d = ((precio_actual / float(serie.iloc[-6])) - 1) * 100
+            ret_10d = ((precio_actual / float(serie.iloc[-11])) - 1) * 100
+            ret_30d = ((precio_actual / float(serie.iloc[-31])) - 1) * 100
+            ret_50d = ((precio_actual / float(serie.iloc[-51])) - 1) * 100
             
-            ax.add_patch(Rectangle((0, 0), limit, limit, color='green', alpha=0.04))
-            ax.add_patch(Rectangle((-limit, 0), limit, limit, color='blue', alpha=0.04))
-            ax.add_patch(Rectangle((-limit, -limit), limit, limit, color='red', alpha=0.04))
-            ax.add_patch(Rectangle((0, -limit), limit, limit, color='yellow', alpha=0.04))
-
-            st.pyplot(fig)
-
-with tab_manual:
-    manual_texto = r"""
-    ## MANUAL TÉCNICO: MOTOR DE CÁLCULO PENGUIN PORTFOLIO PRO
-    
-    ### 1. Obtención de Datos Base
-    El proceso arranca descargando los precios de cierre ajustados (`Close`) de los últimos 2 años para todos los activos de la lista y para el índice de referencia o *benchmark* (en este caso, `MWEQ.DE`, el MSCI World Equal Weight).
-    
-    ---
-    
-    ### 2. El Corazón del Sistema: Coordenadas RRG
-    
-    Para saber si un activo está liderando o rezagado respecto al mundo, no miramos su precio aislado, sino su comportamiento relativo usando la metodología de los *Relative Rotation Graphs* (RRG). Generamos dos coordenadas: **Fuerza (X)** y **Momentum (Y)**.
-    
-    * **Paso A: Fuerza Relativa Básica (RS)**
-        Se divide el precio del activo entre el precio del benchmark.
-        $$RS=\left(\frac{Precio_{Activo}}{Precio_{Benchmark}}\right)\times 100$$
-        
-    * **Paso B: Suavizado**
-        Para evitar el "ruido" diario, se aplica una Media Móvil Exponencial (EMA) de **__RS_SMOOTH__ periodos** a la serie $RS$, obteniendo el $RS_{sm}$.
-    
-    * **Paso C: Coordenada X (JdK RS-Ratio / STR)**
-        Mide la tendencia a largo plazo del activo frente al benchmark. Se normaliza el $RS_{sm}$ usando su media ($\mu$) y desviación estándar ($\sigma$) de los **últimos __PERIODO_X__ periodos**. Se centra en 100.
-        $$X_{RRG}=\left(\frac{RS_{sm}-\mu_{__PERIODO_X__}}{\sigma_{__PERIODO_X__}}\right)\times 10+100$$
-    
-    * **Paso D: Coordenada Y (JdK RS-Momentum / MOM)**
-        Mide la velocidad a la que cambia la fuerza relativa (la inercia a corto plazo). Se calcula la tasa de cambio porcentual a **__PERIODO_Y__ periodos** del $RS_{sm}$, y se vuelve a normalizar estadísticamente (media y desviación a **__PERIODO_Y__ días**).
-        $$Y_{RRG}=\left(\frac{\Delta\%RS_{sm}-\mu_{__PERIODO_Y__}}{\sigma_{__PERIODO_Y__}}\right)\times 10+100$$
-    
-    ---
-    
-    ### 3. Asignación de Cuadrantes (POS)
-    Dependiendo de dónde caigan las coordenadas X e Y (restando 100 para centrar el eje en el origen 0,0), el activo se clasifica en una de las cuatro fases del ciclo:
-    * 🟢 **Leading (Líder):** $X \ge 0$ y $Y \ge 0$ (Fuerte y ganando inercia).
-    * 🔵 **Improving (Mejorando):** $X < 0$ y $Y \ge 0$ (Débil pero ganando inercia).
-    * 🟡 **Weakening (Debilitándose):** $X \ge 0$ y $Y < 0$ (Fuerte pero perdiendo inercia).
-    * 🔴 **Lagging (Rezagado):** $X < 0$ y $Y < 0$ (Débil y perdiendo inercia).
-    
-    ---
-    
-    ### 4. Puntuación Definitiva (SCORE MAESTRO UNIFICADO - NO LINEAL)
-    Para ofrecer una única nota definitiva que sirva para ordenar toda la cartera de forma impecable, el programa fusiona tres dimensiones críticas (Proyección Vectorial, Velocidad y Riesgo) en una sola ecuación progresiva:
-    
-    $$Score = Base + Bono - Penalización$$
-    
-    1. **La Base Vectorial:** Proyección ortogonal que otorga mayor peso al Momentum utilizando la Proporción Áurea ($\varphi \approx 1.618$). Ordena automáticamente el ciclo (Leading > Improving > Weakening > Lagging).
-       $$Base = X_{RRG} + 1.618 \times Y_{RRG}$$
-       
-    2. **El Bono de Velocidad (Progresivo):** Si el activo está acelerando (midiendo la distancia recorrida en el gráfico), se potencia con el exponente **__DEF_VEL_EXP__** y se suma el **__DEF_VELOCITY_WEIGHT__%** de ese valor para premiar los "sprints" bruscos.
-       $$Bono = Velocidad^{__DEF_VEL_EXP__} \times \left(\frac{\text{Bono \%}}{100}\right)$$
-       
-    3. **La Penalización de Riesgo (No Lineal):** Se calcula el Índice Ulcer ($UI$) midiendo las caídas de los últimos __PERIODO_X__ periodos. Si el $UI$ es $\le$ **__DEF_UI_THRESHOLD__**, se aplica el castigo lineal (**__DEF_UI_PENALTY__**). Si supera ese umbral de estrés, se aplica un castigo exponencial elevado a **__DEF_UI_EXP__**.
-       $$\text{Penalización} = \begin{cases} UI \times \text{Penalización Lineal} & \text{si } UI \le __DEF_UI_THRESHOLD__ \\ UI^{__DEF_UI_EXP__} \times \text{Penalización Lineal} & \text{si } UI > __DEF_UI_THRESHOLD__ \end{cases}$$
-    """
-    
-    manual_texto = manual_texto.replace("__RS_SMOOTH__", str(RS_SMOOTH))
-    manual_texto = manual_texto.replace("__PERIODO_X__", str(PERIODO_X))
-    manual_texto = manual_texto.replace("__PERIODO_Y__", str(PERIODO_Y))
-    manual_texto = manual_texto.replace("__DEF_UI_PENALTY__", str(UI_PENALTY))
-    manual_texto = manual_texto.replace("__DEF_VELOCITY_WEIGHT__", str(VEL_WEIGHT))
-    manual_texto = manual_texto.replace("__DEF_VEL_EXP__", str(VEL_EXP))
-    manual_texto = manual_texto.replace("__DEF_UI_THRESHOLD__", str(UI_THRESHOLD))
-    manual_texto = manual_texto.replace("__DEF_UI_EXP__", str(UI_EXP))
-    
-    st.markdown(manual_texto)
+            resultados.append({
+                "Ticker": ticker,
+                "Empresa": nombres_dict[ticker],
+                "Precio Actual": precio_actual,
+                "1 Día": ret_1d,
+                "5 Días": ret_5d,
+                "10 Días": ret_10d,
+                "30 Días": ret_30d,
+                "50 Días": ret_50d
+            })
+            
+        if resultados:
+            df_resultados = pd.DataFrame(resultados)
+            df_resultados = df_resultados.sort_values(by="5 Días", ascending=False).reset_index(drop=True)
+            df_resultados.insert(0, "#", range(1, len(df_resultados) + 1))
+            
+            st.markdown(f"### 🌍 Rendimiento Global: **{sector_elegido}**")
+            
+            column_config = {
+                "#": st.column_config.NumberColumn("#", width="small"),
+                "Ticker": st.column_config.TextColumn("Ticker", width="small"),
+                "Empresa": st.column_config.TextColumn("Empresa", width="medium"),
+                "Precio Actual": st.column_config.NumberColumn("Cierre", format="%.2f"),
+                "1 Día": st.column_config.NumberColumn("1 Día", format="%.2f %%"),
+                "5 Días": st.column_config.NumberColumn("5 Días", format="%.2f %%"),
+                "10 Días": st.column_config.NumberColumn("10 Días", format="%.2f %%"),
+                "30 Días": st.column_config.NumberColumn("30 Días", format="%.2f %%"),
+                "50 Días": st.column_config.NumberColumn("50 Días", format="%.2f %%"),
+            }
+            
+            st.dataframe(
+                df_resultados,
+                use_container_width=True,
+                hide_index=True,
+                column_config=column_config,
+                height=600
+            )
+            
+            faltantes = len(tickers_sector) - len(resultados)
+            if faltantes > 0:
+                st.info(f"💡 **Aviso de Tickers Internacionales:** {faltantes} empresas no se han podido calcular. Esto ocurre porque el CSV de BlackRock usa tickers locales (ej. 'SAN' para Banco Santander) pero Yahoo Finance requiere un sufijo de mercado (ej. 'SAN.MC' para España). Las empresas de EE. UU. cargarán sin problema.")
+        else:
+            st.warning("No se pudieron calcular los retornos para este sector (posiblemente por falta de compatibilidad de los tickers con Yahoo Finance).")
