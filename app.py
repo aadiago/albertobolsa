@@ -494,14 +494,24 @@ else:
                 
             for ticker in tickers_sector:
                 if ticker not in precios_largo.columns or ticker not in precios_corto.columns:
-                    activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict.get(ticker, ""), "País": nacionalidad_dict.get(ticker, ""), "Motivo": "Rechazado por Yahoo Finance"})
+                    activos_fallidos.append({
+                        "Ticker": ticker, 
+                        "Empresa": nombres_dict.get(ticker, ""), 
+                        "País": nacionalidad_dict.get(ticker, ""), 
+                        "Motivo": "Rechazado por Yahoo Finance"
+                    })
                     continue
                     
                 serie_larga = precios_largo[ticker].dropna()
                 serie_corta = precios_corto[ticker].dropna()
                 
                 if len(serie_larga) < 51 or len(serie_corta) < 2: 
-                    activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict.get(ticker, ""), "País": nacionalidad_dict.get(ticker, ""), "Motivo": "Historial insuficiente"})
+                    activos_fallidos.append({
+                        "Ticker": ticker, 
+                        "Empresa": nombres_dict.get(ticker, ""), 
+                        "País": nacionalidad_dict.get(ticker, ""), 
+                        "Motivo": "Historial insuficiente"
+                    })
                     continue
                 
                 try:
@@ -526,4 +536,35 @@ else:
                         "50 Días": ((p_act / p_50d) - 1) * 100
                     })
                 except Exception:
-                    activos_fallidos.append({"Ticker":
+                    activos_fallidos.append({
+                        "Ticker": ticker, 
+                        "Empresa": nombres_dict.get(ticker, ""), 
+                        "País": nacionalidad_dict.get(ticker, ""), 
+                        "Motivo": "Error de cálculo interno"
+                    })
+                    
+            if resultados:
+                df_resultados = pd.DataFrame(resultados)
+                df_resultados = df_resultados.sort_values(by="Peso Global", ascending=False).reset_index(drop=True)
+                df_resultados.insert(0, "#", range(1, len(df_resultados) + 1))
+                
+                st.markdown(f"### 📈 Rendimiento Global: **{sector_elegido}**")
+                
+                estilo_df = df_resultados.style.format({
+                                                   "Peso Global": "{:.3f} %",
+                                                   "Precio Actual": "$ {:.2f}",
+                                                   "1 Día": "{:.2f} %",
+                                                   "5 Días": "{:.2f} %",
+                                                   "10 Días": "{:.2f} %",
+                                                   "30 Días": "{:.2f} %",
+                                                   "50 Días": "{:.2f} %"
+                                               })
+                
+                st.dataframe(estilo_df, use_container_width=True, hide_index=True, height=600)
+            
+            if activos_fallidos:
+                st.divider()
+                st.markdown(f"### ⚠️ Activos no cargados ({len(activos_fallidos)})")
+                
+                df_fallos = pd.DataFrame(activos_fallidos)
+                st.dataframe(df_fallos, use_container_width=True, hide_index=True)
