@@ -44,8 +44,8 @@ with col_h2:
 
 st.divider()
 
-# --- 3. MOTOR DE EXTRACCIÓN DE DATOS (BLACKROCK CSV) ---
-@st.cache_data(ttl=86400) # Cachear la lista por 1 día
+# --- 3. MOTOR DE EXTRACCIÓN Y TRADUCCIÓN DE DATOS ---
+@st.cache_data(ttl=86400) # Cachear 1 día
 def obtener_empresas_msci_world():
     url = "https://www.ishares.com/us/products/239696/ishares-msci-world-etf/1467271812596.ajax?fileType=csv&fileName=URTH_holdings&dataType=fund"
     headers = {
@@ -54,90 +54,138 @@ def obtener_empresas_msci_world():
     
     try:
         response = requests.get(url, headers=headers)
-        # BlackRock suele poner 9 líneas de metadatos antes de la tabla
-        df = pd.read_csv(io.StringIO(response.text), skiprows=9)
         
-        # Limpieza básica
+        # Búsqueda dinámica de la cabecera (evita errores si BlackRock añade líneas de aviso)
+        lineas = response.text.splitlines()
+        header_idx = 0
+        for i, linea in enumerate(lineas):
+            if "Ticker" in linea and "Name" in linea:
+                header_idx = i
+                break
+                
+        df = pd.read_csv(io.StringIO(response.text), skiprows=header_idx)
         df = df.dropna(subset=['Ticker', 'Sector'])
         df = df[df['Asset Class'] == 'Equity']
         
-        # Adaptación de columnas para mantener la lógica anterior
-        df = df.rename(columns={'Ticker': 'Symbol', 'Name': 'Security', 'Sector': 'GICS Sector'})
+        # Traductor de Bolsas a Nomenclatura Yahoo Finance
+        sufijos = {
+            'London': '.L',
+            'Tokyo': '.T',
+            'Toronto': '.TO',
+            'Euronext Amsterdam': '.AS',
+            'Euronext Paris': '.PA',
+            'Xetra': '.DE',
+            'SIX Swiss': '.SW',
+            'Madrid': '.MC',
+            'Borsa Italiana': '.MI',
+            'Sydney': '.AX',
+            'Copenhagen': '.CO',
+            'Stockholm': '.ST',
+            'Oslo': '.OL',
+            'Helsinki': '.HE',
+            'Hong Kong': '.HK',
+            'Singapore': '.SI',
+            'Vienna': '.VI',
+            'Tel Aviv': '.TA',
+            'New Zealand': '.NZ'
+        }
         
-        # Limpieza de Tickers para Yahoo Finance (Reemplazar puntos por guiones, ej. BRK.B -> BRK-B)
-        df['Symbol'] = df['Symbol'].astype(str).str.replace('.', '-', regex=False)
+        tickers_adaptados = []
+        for _, row in df.iterrows():
+            ticker_base = str(row['Ticker']).replace('.', '-').strip()
+            bolsa = str(row['Exchange'])
+            ticker_final = ticker_base
+            
+            for mercado, sufijo in sufijos.items():
+                if mercado in bolsa:
+                    ticker_final = f"{ticker_base}{sufijo}"
+                    break
+            tickers_adaptados.append(ticker_final)
+            
+        df['Symbol_Yahoo'] = tickers_adaptados
+        df = df.rename(columns={'Name': 'Security', 'Sector': 'GICS Sector'})
         
-        return df[['Symbol', 'Security', 'GICS Sector']]
+        return df[['Symbol_Yahoo', 'Security', 'GICS Sector']]
     except Exception as e:
-        st.error(f"Error de conexión con iShares: {e}")
-        return pd.DataFrame(columns=['Symbol', 'Security', 'GICS Sector'])
+        st.error(f"Error procesando el archivo de BlackRock: {e}")
+        return pd.DataFrame()
 
-@st.cache_data(ttl=3600) # Cachear precios por 1 hora
+@st.cache_data(ttl=3600) # Cachear precios 1 hora
 def descargar_precios(tickers):
-    data = yf.download(tickers, period="4mo", auto_adjust=True, progress=False)['Close']
+    # Descargamos 4 meses para asegurar los 50 días de cotización hábiles
+    data = yf.download(tickers, period="4mo", auto_adjust=True, progress=False)
+    if 'Close' in data:
+        return data['Close']
     return data
 
 # --- 4. LÓGICA DE INTERFAZ Y CÁLCULO ---
 df_msci = obtener_empresas_msci_world()
 
-if df_msci.empty:
-    st.warning("No se pudieron cargar los datos del MSCI World. Inténtalo de nuevo más tarde.")
-else:
+if not df_msci.empty:
     sectores = sorted(df_msci['GICS Sector'].unique())
     
     col_sel, col_empty = st.columns([1, 3])
     with col_sel:
-        sector_elegido = st.selectbox("🎯 Selecciona un Sector global:", sectores)
+        sector_elegido = st.selectbox("🎯 Selecciona un Sector Global (MSCI World):", sectores)
     
     empresas_sector = df_msci[df_msci['GICS Sector'] == sector_elegido]
-    tickers_sector = empresas_sector['Symbol'].tolist()
-    nombres_dict = dict(zip(empresas_sector['Symbol'], empresas_sector['Security']))
+    tickers_sector = empresas_sector['Symbol_Yahoo'].tolist()
+    nombres_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Security']))
     
-    with st.spinner(f"Sincronizando {len(tickers_sector)} empresas globales de {sector_elegido}... (Las acciones no estadounidenses podrían no cargar sin su sufijo de país)"):
+    with st.spinner(f"Sincronizando {len(tickers_sector)} activos globales de {sector_elegido}..."):
         precios = descargar_precios(tickers_sector)
     
     if not precios.empty:
         resultados = []
-        precios = precios.ffill()
+        activos_fallidos = [] # Aquí guardaremos los que den error
         
-        # yfinance devuelve un DataFrame distinto si es 1 ticker vs múltiples
+        precios = precios.ffill()
         if isinstance(precios, pd.Series):
             precios = precios.to_frame(name=tickers_sector[0])
             
         for ticker in tickers_sector:
+            # Comprobación 1: ¿Descargó Yahoo Finance la columna?
             if ticker not in precios.columns:
+                activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict[ticker], "Motivo": "No encontrado en Yahoo Finance"})
                 continue
                 
             serie = precios[ticker].dropna()
+            
+            # Comprobación 2: ¿Hay suficientes días de histórico?
             if len(serie) < 51: 
+                activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict[ticker], "Motivo": "Historial insuficiente (< 50 días)"})
                 continue
                 
             precio_actual = float(serie.iloc[-1])
             
-            # Cálculo de retornos (días hábiles)
-            ret_1d = ((precio_actual / float(serie.iloc[-2])) - 1) * 100
-            ret_5d = ((precio_actual / float(serie.iloc[-6])) - 1) * 100
-            ret_10d = ((precio_actual / float(serie.iloc[-11])) - 1) * 100
-            ret_30d = ((precio_actual / float(serie.iloc[-31])) - 1) * 100
-            ret_50d = ((precio_actual / float(serie.iloc[-51])) - 1) * 100
-            
-            resultados.append({
-                "Ticker": ticker,
-                "Empresa": nombres_dict[ticker],
-                "Precio Actual": precio_actual,
-                "1 Día": ret_1d,
-                "5 Días": ret_5d,
-                "10 Días": ret_10d,
-                "30 Días": ret_30d,
-                "50 Días": ret_50d
-            })
-            
+            # Cálculos (Días hábiles)
+            try:
+                ret_1d = ((precio_actual / float(serie.iloc[-2])) - 1) * 100
+                ret_5d = ((precio_actual / float(serie.iloc[-6])) - 1) * 100
+                ret_10d = ((precio_actual / float(serie.iloc[-11])) - 1) * 100
+                ret_30d = ((precio_actual / float(serie.iloc[-31])) - 1) * 100
+                ret_50d = ((precio_actual / float(serie.iloc[-51])) - 1) * 100
+                
+                resultados.append({
+                    "Ticker": ticker,
+                    "Empresa": nombres_dict[ticker],
+                    "Precio Actual": precio_actual,
+                    "1 Día": ret_1d,
+                    "5 Días": ret_5d,
+                    "10 Días": ret_10d,
+                    "30 Días": ret_30d,
+                    "50 Días": ret_50d
+                })
+            except Exception:
+                activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict[ticker], "Motivo": "Error de cálculo matemático"})
+                
+        # --- 5. VISUALIZACIÓN DE RESULTADOS ---
         if resultados:
             df_resultados = pd.DataFrame(resultados)
             df_resultados = df_resultados.sort_values(by="5 Días", ascending=False).reset_index(drop=True)
             df_resultados.insert(0, "#", range(1, len(df_resultados) + 1))
             
-            st.markdown(f"### 🌍 Rendimiento Global: **{sector_elegido}**")
+            st.markdown(f"### 📈 Rendimiento Global: **{sector_elegido}**")
             
             column_config = {
                 "#": st.column_config.NumberColumn("#", width="small"),
@@ -151,16 +199,15 @@ else:
                 "50 Días": st.column_config.NumberColumn("50 Días", format="%.2f %%"),
             }
             
-            st.dataframe(
-                df_resultados,
-                use_container_width=True,
-                hide_index=True,
-                column_config=column_config,
-                height=600
-            )
+            st.dataframe(df_resultados, use_container_width=True, hide_index=True, column_config=column_config, height=500)
+        
+        # --- 6. REPORTE DE ACTIVOS FALLIDOS ---
+        if activos_fallidos:
+            st.divider()
+            st.markdown(f"### ⚠️ Activos no cargados ({len(activos_fallidos)})")
+            st.markdown("Las siguientes empresas no han podido ser procesadas. Esto suele ocurrir por discrepancias menores en los Tickers entre BlackRock y Yahoo Finance, fusiones/adquisiciones recientes, o falta de liquidez.")
             
-            faltantes = len(tickers_sector) - len(resultados)
-            if faltantes > 0:
-                st.info(f"💡 **Aviso de Tickers Internacionales:** {faltantes} empresas no se han podido calcular. Esto ocurre porque el CSV de BlackRock usa tickers locales (ej. 'SAN' para Banco Santander) pero Yahoo Finance requiere un sufijo de mercado (ej. 'SAN.MC' para España). Las empresas de EE. UU. cargarán sin problema.")
-        else:
-            st.warning("No se pudieron calcular los retornos para este sector (posiblemente por falta de compatibilidad de los tickers con Yahoo Finance).")
+            df_fallos = pd.DataFrame(activos_fallidos)
+            st.dataframe(df_fallos, use_container_width=True, hide_index=True)
+else:
+    st.error("Error crítico: No se ha podido cargar el universo MSCI World.")
