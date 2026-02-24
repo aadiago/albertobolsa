@@ -1,16 +1,23 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-from datetime import datetime, timedelta
+import os
 import time
+from datetime import datetime, timedelta
 
 # --- 1. CONFIGURACIÓN ---
-st.set_page_config(layout="wide", page_title="Copper/Gold Sector Rotator")
+st.set_page_config(layout="wide", page_title="Safe Rotator")
 
-st.title("🌍 Rotación Sectorial: Cobre/Oro vs MSCI World")
-st.markdown("Estrategia: Cobre/Oro > Media (Cíclicos) | Cobre/Oro < Media (Defensivos)")
+st.markdown("""
+    <style>
+    .main-title { font-size: 1.5rem; font-weight: bold; color: #1E1E1E; }
+    .stProgress > div > div > div > div { background-color: #00ACEE; }
+    </style>
+""", unsafe_allow_html=True)
 
-# --- 2. TICKERS ---
+st.markdown('<p class="main-title">🌍 Estrategia Sectorial Cobre/Oro</p>', unsafe_allow_html=True)
+
+# Tickers estrictos
 SECTORES = {
     "Tecnología": "TELW.PA", "Energía": "WELJ.DE", "Salud": "WELW.DE",
     "Consumo Básico": "XDW0.DE", "Financiero": "WF1E.DE", "Consumo Discrecional": "WELS.DE",
@@ -22,114 +29,108 @@ DEFENSIVOS = ["Salud", "Consumo Básico", "Utilities", "Comunicación", "Real Es
 BENCHMARK = "EUNL.DE"
 COMMODITIES = ["HG=F", "GC=F"]
 ALL_TICKERS = list(SECTORES.values()) + [BENCHMARK] + COMMODITIES
+CSV_FILE = "db_precios.csv"
 
-# --- 3. MOTOR DE DESCARGA (SECUENCIAL PARA EVITAR ERRORES) ---
-@st.cache_data(ttl=86400)
-def descargar_datos(años):
-    fin = datetime.now()
-    inicio = fin - timedelta(days=años * 365 + 100)
+# --- 2. MOTOR DE DATOS (SISTEMA DE SEGURIDAD) ---
+def sincronizar_activos():
+    df_final = pd.DataFrame()
     
-    master_df = pd.DataFrame()
-    progreso = st.progress(0)
-    status = st.empty()
-    
-    for i, ticker in enumerate(ALL_TICKERS):
-        status.text(f"Descargando {ticker}...")
-        try:
-            # Descarga individual: la más lenta pero la única que no falla en 3.13
-            data = yf.Ticker(ticker).history(start=inicio, end=fin)
-            if not data.empty:
-                master_df[ticker] = data['Close']
-            time.sleep(0.2) 
-        except Exception as e:
-            st.error(f"Fallo en {ticker}: {e}")
-        progreso.progress((i + 1) / len(ALL_TICKERS))
-    
-    status.empty()
-    progreso.empty()
-    return master_df.ffill()
+    # Si existe el archivo, lo leemos para no pedir datos antiguos
+    if os.path.exists(CSV_FILE):
+        df_final = pd.read_csv(CSV_FILE, index_col=0, parse_dates=True)
+        start_date = df_final.index.max() + timedelta(days=1)
+    else:
+        # Si no existe, bajamos los últimos 5 años (evitamos 'max' para no saturar)
+        start_date = datetime.now() - timedelta(days=5 * 365)
 
-# --- 4. INTERFAZ DE USUARIO ---
+    # Si necesitamos actualizar (ha pasado más de un día)
+    if (datetime.now() - start_date.replace(tzinfo=None) if start_date.tzinfo else datetime.now() - start_date).days >= 1:
+        with st.status("🚀 Sincronizando datos paso a paso...", expanded=True) as status:
+            nuevos_datos = {}
+            for ticker in ALL_TICKERS:
+                status.write(f"Actualizando {ticker}...")
+                try:
+                    # history() es mucho más estable que download() en Python 3.13
+                    h = yf.Ticker(ticker).history(start=start_date, end=datetime.now())
+                    if not h.empty:
+                        nuevos_datos[ticker] = h['Close']
+                    time.sleep(0.2) # Pausa mínima para no colapsar la conexión
+                except:
+                    continue
+            
+            if nuevos_datos:
+                df_new = pd.DataFrame(nuevos_datos)
+                df_final = pd.concat([df_final, df_new]).sort_index()
+                df_final = df_final[~df_final.index.duplicated(keep='last')]
+                df_final.to_csv(CSV_FILE)
+            status.update(label="✅ Datos al día", state="complete")
+    
+    return df_final.ffill()
+
+# --- 3. LÓGICA DE CONTROL ---
 with st.sidebar:
     st.header("Configuración")
-    años_bt = st.slider("Años de Backtesting", 1, 15, 5)
-    ma_ratio = st.number_input("Media Móvil Ratio (Días)", value=50)
-    if st.button("Recargar Datos"):
+    ma_val = st.number_input("Media Móvil Ratio (Días)", value=50)
+    if st.button("Limpiar y Recargar Todo"):
+        if os.path.exists(CSV_FILE): os.remove(CSV_FILE)
         st.cache_data.clear()
         st.rerun()
 
-# --- 5. LÓGICA DE LA ESTRATEGIA ---
-df_precios = descargar_datos(años_bt)
+# --- 4. EJECUCIÓN ---
+df = sincronizar_activos()
 
-if not df_precios.empty:
-    # A. Señal
-    ratio = (df_precios["HG=F"] / df_precios["GC=F"]).dropna()
-    ma = ratio.rolling(window=ma_ratio).mean()
+if not df.empty and all(c in df.columns for c in COMMODITIES):
+    # Ratio
+    ratio = (df["HG=F"] / df["GC=F"]).dropna()
+    ma = ratio.rolling(window=ma_val).mean()
     
-    # B. Datos Mensuales
-    # Usamos el cierre de mes para decidir y el mes siguiente para medir rentabilidad
-    df_m = df_precios.resample('ME').last()
+    # Análisis Mensual
+    df_m = df.resample('ME').last()
     ratio_m = ratio.resample('ME').last()
     ma_m = ma.resample('ME').last()
     
-    returns_m = df_m.pct_change() # Retorno pasado (para momentum)
-    future_returns_m = df_m.pct_change().shift(-1) # Retorno futuro (el que ganamos)
+    ret_futuros = df_m.pct_change().shift(-1)
+    ret_pasados = df_m.pct_change()
     
-    bt_log = []
-    
+    bt = []
     for i in range(len(df_m) - 1):
         if pd.isna(ma_m.iloc[i]): continue
         
-        # 1. Régimen
-        regimen_on = ratio_m.iloc[i] > ma_m.iloc[i]
-        pool = CICLICOS if regimen_on else DEFENSIVOS
+        # Régimen
+        pool = CICLICOS if ratio_m.iloc[i] > ma_m.iloc[i] else DEFENSIVOS
         
-        # 2. Selección Top 3 por Momentum (mejor retorno el mes anterior)
-        past_rets = returns_m.iloc[i]
-        pool_tickers = {k: v for k, v in SECTORES.items() if k in pool}
-        # Ordenamos y cogemos los 3 mejores
-        top_3 = sorted(pool_tickers.items(), key=lambda x: past_rets.get(x[1], -999), reverse=True)[:3]
+        # Momentum (Top 3 del bando elegido)
+        past = ret_pasados.iloc[i]
+        t_pool = {k: v for k, v in SECTORES.items() if k in pool}
+        top_3 = sorted(t_pool.items(), key=lambda x: past.get(x[1], -999), reverse=True)[:3]
         
-        nombres_selec = [x[0] for x in top_3]
-        tickers_selec = [x[1] for x in top_3]
+        t_tickers = [x[1] for x in top_3]
         
-        # 3. Resultado
-        ret_estrategia = future_returns_m[tickers_selec].iloc[i].mean()
-        ret_msci = future_returns_m[BENCHMARK].iloc[i]
-        
-        bt_log.append({
-            "Fecha": df_m.index[i+1].strftime('%Y-%m'),
-            "Régimen": "Cíclico" if regimen_on else "Defensivo",
-            "Sectores": ", ".join(nombres_selec),
-            "Estrategia %": ret_est := (ret_estrategia * 100),
-            "MSCI World %": ret_m := (ret_msci * 100),
-            "Alpha": ret_est - ret_m
+        bt.append({
+            "Mes": df_m.index[i+1].strftime('%Y-%m'),
+            "Régimen": "Cíclico" if ratio_m.iloc[i] > ma_m.iloc[i] else "Defensivo",
+            "Sectores": ", ".join([x[0] for x in top_3]),
+            "Estrategia %": ret_futuros[t_tickers].iloc[i].mean() * 100,
+            "MSCI World %": ret_futuros[BENCHMARK].iloc[i] * 100
         })
 
-    if bt_log:
-        df_bt = pd.DataFrame(bt_log)
+    if bt:
+        df_bt = pd.DataFrame(bt)
         
-        # --- 6. RESULTADOS ---
+        # Métricas
         c1, c2, c3 = st.columns(3)
-        cum_e = (1 + df_bt["Estrategia %"]/100).prod() - 1
-        cum_m = (1 + df_bt["MSCI World %"]/100).prod() - 1
-        
-        c1.metric("Retorno Estrategia", f"{cum_e:.1%}")
-        c2.metric("Retorno MSCI World", f"{cum_m:.1%}")
-        c3.metric("Alpha Generado", f"{(cum_e - cum_m):.1%}", delta=f"{(cum_e - cum_m):.1%}")
-        
+        c_est = (1 + df_bt["Estrategia %"]/100).prod() - 1
+        c_msci = (1 + df_bt["MSCI World %"]/100).prod() - 1
+        c1.metric("Estrategia", f"{c_est:.1%}")
+        c2.metric("MSCI World", f"{c_msci:.1%}")
+        c3.metric("Alpha", f"{(c_est - c_msci):.1%}", delta=f"{(c_est - c_msci):.1%}")
+
         # Gráfico
         df_bt["Idx_E"] = (1 + df_bt["Estrategia %"]/100).cumprod() * 100
         df_bt["Idx_M"] = (1 + df_bt["MSCI World %"]/100).cumprod() * 100
-        st.line_chart(df_bt.set_index("Fecha")[["Idx_E", "Idx_M"]])
+        st.line_chart(df_bt.set_index("Mes")[["Idx_E", "Idx_M"]])
         
         # Tabla
-        st.dataframe(df_bt.style.format({
-            "Estrategia %": "{:.2f}%",
-            "MSCI World %": "{:.2f}%",
-            "Alpha": "{:.2f}%"
-        }).background_gradient(subset=["Alpha"], cmap="RdYlGn"), use_container_width=True)
-    else:
-        st.warning("No hay suficientes datos comunes para el periodo seleccionado.")
+        st.dataframe(df_bt.style.format({"Estrategia %": "{:.2f}%", "MSCI World %": "{:.2f}%"}), use_container_width=True)
 else:
-    st.error("No se han podido descargar los datos. Inténtalo de nuevo en unos minutos.")
+    st.info("Esperando sincronización de datos...")
