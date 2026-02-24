@@ -44,7 +44,7 @@ with col_h2:
 
 st.divider()
 
-# --- 3. MOTOR DE EXTRACCIÓN Y TRADUCCIÓN DE DATOS (VERSIÓN 2 - BYPASS CACHÉ) ---
+# --- 3. MOTOR DE EXTRACCIÓN Y TRADUCCIÓN DE DATOS ---
 @st.cache_data(ttl=86400) 
 def obtener_empresas_msci_world_v2():
     url = "https://www.ishares.com/us/products/239696/ishares-msci-world-etf/1467271812596.ajax?fileType=csv&fileName=URTH_holdings&dataType=fund"
@@ -64,11 +64,8 @@ def obtener_empresas_msci_world_v2():
                 break
                 
         df = pd.read_csv(io.StringIO(response.text), skiprows=header_idx)
-        
-        # 🛡️ Limpieza de espacios invisibles en las columnas (Evita el KeyError)
         df.columns = df.columns.str.strip()
         
-        # Adaptación para variaciones en el nombre de la columna de peso
         if 'Weight (%)' in df.columns:
             peso_col = 'Weight (%)'
         elif 'Weight' in df.columns:
@@ -80,56 +77,41 @@ def obtener_empresas_msci_world_v2():
         df = df.dropna(subset=['Ticker', 'Sector'])
         df = df[df['Asset Class'] == 'Equity']
         
-        # Traductor de Bolsas a Nomenclatura Yahoo Finance (Ampliado)
+        # Traductor de Bolsas a Nomenclatura Yahoo Finance
         sufijos = {
-            'london': '.L',
-            'tokyo': '.T',
-            'toronto': '.TO',
-            'amsterdam': '.AS',
-            'paris': '.PA',
-            'brussels': '.BR',      # Añadido Bélgica
-            'belgium': '.BR',       # Respaldo por país
-            'lisbon': '.LS',        # Añadido Portugal
-            'xetra': '.DE',
-            'frankfurt': '.DE',
-            'germany': '.DE',
-            'six swiss': '.SW',
-            'switzerland': '.SW',
-            'madrid': '.MC',
-            'spain': '.MC',
-            'borsa italiana': '.MI',
-            'milan': '.MI',
-            'italy': '.MI',
-            'sydney': '.AX',
-            'australia': '.AX',
-            'copenhagen': '.CO',
-            'denmark': '.CO',
-            'stockholm': '.ST',     # Suecia
-            'sweden': '.ST',        # Respaldo por país
-            'oslo': '.OL',
-            'norway': '.OL',
-            'helsinki': '.HE',
-            'finland': '.HE',
-            'hong kong': '.HK',
-            'singapore': '.SI',
-            'vienna': '.VI',
-            'austria': '.VI',
-            'tel aviv': '.TA',
-            'israel': '.TA',
-            'new zealand': '.NZ',
-            'dublin': '.IR',
+            'london': '.L', 'tokyo': '.T', 'toronto': '.TO', 'amsterdam': '.AS',
+            'paris': '.PA', 'brussels': '.BR', 'belgium': '.BR', 'lisbon': '.LS',
+            'xetra': '.DE', 'frankfurt': '.DE', 'germany': '.DE', 'six swiss': '.SW',
+            'switzerland': '.SW', 'madrid': '.MC', 'spain': '.MC', 'borsa italiana': '.MI',
+            'milan': '.MI', 'italy': '.MI', 'sydney': '.AX', 'australia': '.AX',
+            'copenhagen': '.CO', 'denmark': '.CO', 'stockholm': '.ST', 'sweden': '.ST',
+            'oslo': '.OL', 'norway': '.OL', 'helsinki': '.HE', 'finland': '.HE',
+            'hong kong': '.HK', 'singapore': '.SI', 'vienna': '.VI', 'austria': '.VI',
+            'tel aviv': '.TA', 'israel': '.TA', 'new zealand': '.NZ', 'dublin': '.IR',
             'ireland': '.IR'
         }
         
         tickers_adaptados = []
         for _, row in df.iterrows():
-            # Limpieza exhaustiva del ticker
-            ticker_base = str(row['Ticker']).strip().replace('.', '-').replace(' ', '-').replace('/', '-')
+            ticker_original = str(row['Ticker']).strip()
+            nombre_empresa = str(row['Name']).upper()
+            
+            # --- EXCEPCIONES DIRECTAS ---
+            if ticker_original == 'SPOT':
+                tickers_adaptados.append('SPOT')
+                continue
+                
+            if ticker_original.startswith('JD') and 'JD' in nombre_empresa:
+                tickers_adaptados.append('JD.L')
+                continue
+            
+            # Limpieza estándar
+            ticker_base = ticker_original.replace('.', '-').replace(' ', '-').replace('/', '-')
             bolsa = str(row['Exchange']).lower()
             pais = str(row['Location']).lower()
             ticker_final = ticker_base
             
-            # Buscamos coincidencias primero en el Exchange, y si no, en la Localización (País)
+            # Asignación de sufijo
             asignado = False
             for mercado, sufijo in sufijos.items():
                 if mercado in bolsa:
@@ -137,18 +119,21 @@ def obtener_empresas_msci_world_v2():
                     asignado = True
                     break
             
-            # Si la bolsa no nos dio el sufijo, probamos con el país
             if not asignado:
                 for mercado, sufijo in sufijos.items():
                     if mercado in pais:
                         ticker_final = f"{ticker_base}{sufijo}"
                         break
+            
+            # --- POST-PROCESADO: HONG KONG ---
+            if ticker_final.endswith('.HK'):
+                base_hk = ticker_final.replace('.HK', '')
+                ticker_final = f"{base_hk.zfill(4)}.HK"
                         
             tickers_adaptados.append(ticker_final)
             
         df['Symbol_Yahoo'] = tickers_adaptados
         
-        # Renombrar columnas
         df = df.rename(columns={
             'Name': 'Security', 
             'Sector': 'GICS Sector',
@@ -168,7 +153,6 @@ def descargar_precios(tickers):
         return data['Close']
     return data
 
-# --- Lógica de colores para la tabla ---
 def dar_color(val):
     if isinstance(val, (int, float)):
         color = '#d4edda' if val > 0 else '#f8d7da' if val < 0 else 'white'
@@ -188,7 +172,6 @@ if not df_msci.empty:
     empresas_sector = df_msci[df_msci['GICS Sector'] == sector_elegido]
     tickers_sector = empresas_sector['Symbol_Yahoo'].tolist()
     
-    # Diccionarios de acceso rápido
     nombres_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Security']))
     nacionalidad_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Nacionalidad']))
     peso_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Peso_Global']))
@@ -247,7 +230,6 @@ if not df_msci.empty:
             
             st.markdown(f"### 📈 Rendimiento Global: **{sector_elegido}**")
             
-            # Aplicamos el estilo de color a las columnas de retorno
             estilo_df = df_resultados.style.map(dar_color, subset=['1 Día', '5 Días', '10 Días', '30 Días', '50 Días']) \
                                            .format({
                                                "Peso Global": "{:.3f} %",
