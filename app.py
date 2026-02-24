@@ -3,6 +3,8 @@ import pandas as pd
 import yfinance as yf
 import requests
 import io
+import os
+from datetime import date
 
 # --- 1. CONFIGURACIÓN VISUAL Y ESTADOS ---
 st.set_page_config(layout="wide", page_title="MSCI WORLD TRACKER PRO", page_icon="🌍")
@@ -147,7 +149,6 @@ def obtener_empresas_msci_world_v9():
                 tickers_adaptados.append('BP.L')
                 continue
             
-            # --- LIMPIEZA ESTÁNDAR ---
             ticker_base = ticker_original.replace('.', '-').replace(' ', '-').replace('/', '-')
             ticker_base = ticker_base.rstrip('-') 
             
@@ -197,13 +198,64 @@ def obtener_empresas_msci_world_v9():
         st.error(f"Error procesando el archivo de BlackRock: {e}")
         return pd.DataFrame()
 
-@st.cache_data(ttl=3600) 
-def descargar_precios_v9(tickers):
+def descargar_precios_optimizados(tickers):
+    """Descarga el historial largo de 1 año y lo guarda en CSV para máxima velocidad"""
+    if not tickers:
+        return pd.DataFrame()
+        
+    hoy = date.today().strftime("%Y-%m-%d")
+    archivo_cache = f"msci_precios_cache_{hoy}.csv"
+    
+    if os.path.exists(archivo_cache):
+        try:
+            return pd.read_csv(archivo_cache, index_col=0, parse_dates=True)
+        except Exception:
+            pass 
+            
+    tickers_unicos = list(set(tickers))
+    data = yf.download(tickers_unicos, period="1y", auto_adjust=True, progress=False, threads=True)
+    
+    if data.empty:
+        return pd.DataFrame()
+        
+    try:
+        if isinstance(data.columns, pd.MultiIndex):
+            if 'Close' in data.columns.levels[0]:
+                df_close = data['Close']
+            elif 'Close' in data.columns.levels[1]:
+                df_close = data.xs('Close', axis=1, level=1)
+            else:
+                return pd.DataFrame()
+        else:
+            if 'Close' in data.columns:
+                if len(tickers_unicos) == 1:
+                    df_close = data[['Close']].rename(columns={'Close': tickers_unicos[0]})
+                else:
+                    df_close = data[['Close']]
+            else:
+                return pd.DataFrame()
+                
+        if not df_close.empty:
+            for f in os.listdir():
+                if f.startswith("msci_precios_cache_") and f.endswith(".csv"):
+                    try:
+                        os.remove(f)
+                    except Exception:
+                        pass
+            df_close.to_csv(archivo_cache)
+            
+        return df_close
+    except Exception:
+        return pd.DataFrame()
+
+@st.cache_data(ttl=120) 
+def descargar_precios_tiempo_real(tickers):
+    """Descarga ligera (5 días) en tiempo real con actualización cada 2 minutos"""
     if not tickers:
         return pd.DataFrame()
         
     tickers_unicos = list(set(tickers))
-    data = yf.download(tickers_unicos, period="1y", auto_adjust=True, progress=False, threads=False)
+    data = yf.download(tickers_unicos, period="5d", auto_adjust=True, progress=False, threads=True)
     
     if data.empty:
         return pd.DataFrame()
@@ -229,17 +281,11 @@ def descargar_precios_v9(tickers):
     except Exception:
         return pd.DataFrame()
 
-def dar_color(val):
-    if isinstance(val, (int, float)):
-        color = '#d4edda' if val > 0 else '#f8d7da' if val < 0 else 'white'
-        return f'background-color: {color}; color: #155724 if val > 0 else #721c24'
-    return ''
-
 # --- 4. NAVEGACIÓN Y RENDERIZADO DE PANTALLAS ---
 df_msci = obtener_empresas_msci_world_v9()
 
 if df_msci.empty:
-    st.error("Error crítico: No se ha podido cargar el universo MSCI World. Verifica tu conexión a internet o los servidores de iShares.")
+    st.error("Error crítico: No se ha podido cargar el universo MSCI World.")
 else:
     # --- PANTALLA PRINCIPAL ---
     if st.session_state.page == 'main':
@@ -251,27 +297,32 @@ else:
                 st.session_state.page = 'components'
                 st.rerun()
                 
-        with st.spinner("Calculando ponderaciones y rendimiento sectorial (1 año)..."):
-            # Preparar gráfico de barras nativo de Streamlit
+        with st.spinner("Actualizando datos en tiempo real..."):
             sector_weights = df_msci.groupby('GICS Sector')['Peso_Global'].sum().sort_values(ascending=False)
             
-            # Preparar rendimientos por sector
             tickers_todos = df_msci['Symbol_Yahoo'].tolist()
-            precios_todos = descargar_precios_v9(tickers_todos)
+            precios_largo = descargar_precios_optimizados(tickers_todos)
+            precios_corto = descargar_precios_tiempo_real(tickers_todos)
             
-            if not precios_todos.empty:
-                precios_todos = precios_todos.ffill()
+            if not precios_largo.empty and not precios_corto.empty:
+                precios_largo = precios_largo.ffill()
+                precios_corto = precios_corto.ffill()
                 datos_retornos = []
                 
                 for ticker in tickers_todos:
-                    if ticker in precios_todos.columns:
-                        serie = precios_todos[ticker].dropna()
-                        if len(serie) >= 2:
-                            p_act = float(serie.iloc[-1])
-                            p_1d = float(serie.iloc[-2])
-                            p_1m = float(serie.iloc[-22]) if len(serie) >= 22 else float(serie.iloc[0])
-                            p_3m = float(serie.iloc[-64]) if len(serie) >= 64 else float(serie.iloc[0])
-                            p_1y = float(serie.iloc[-252]) if len(serie) >= 252 else float(serie.iloc[0])
+                    if ticker in precios_largo.columns and ticker in precios_corto.columns:
+                        serie_larga = precios_largo[ticker].dropna()
+                        serie_corta = precios_corto[ticker].dropna()
+                        
+                        if len(serie_larga) >= 252 and len(serie_corta) >= 2:
+                            # p_act y p_1d se obtienen siempre del precio en tiempo real
+                            p_act = float(serie_corta.iloc[-1])
+                            p_1d = float(serie_corta.iloc[-2])
+                            
+                            # Los datos largos usan la base histórica
+                            p_1m = float(serie_larga.iloc[-22])
+                            p_3m = float(serie_larga.iloc[-64])
+                            p_1y = float(serie_larga.iloc[-252])
                             
                             datos_retornos.append({
                                 'Symbol_Yahoo': ticker,
@@ -301,15 +352,13 @@ else:
                     
                 df_resumen = pd.DataFrame(resumen_sectores).sort_values(by='Peso (%)', ascending=False)
                 
-                # Visualización Principal
                 col_chart, col_table = st.columns([1, 1.5])
                 with col_chart:
                     st.markdown("##### Distribución de Sectores (%)")
                     st.bar_chart(sector_weights)
                 with col_table:
                     st.markdown("<br>", unsafe_allow_html=True)
-                    estilo_resumen = df_resumen.style.map(dar_color, subset=['1 Día', '1 Mes', '3 Meses', '1 Año']) \
-                                                     .format({
+                    estilo_resumen = df_resumen.style.format({
                                                          "Peso (%)": "{:.2f} %",
                                                          "1 Día": "{:.2f} %",
                                                          "1 Mes": "{:.2f} %",
@@ -342,36 +391,36 @@ else:
         nacionalidad_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Nacionalidad']))
         peso_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Peso_Global']))
         
-        with st.spinner(f"Sincronizando {len(tickers_sector)} activos globales de forma segura..."):
-            precios = descargar_precios_v9(tickers_sector)
+        with st.spinner(f"Sincronizando {len(tickers_sector)} activos en tiempo real..."):
+            precios_largo = descargar_precios_optimizados(tickers_sector)
+            precios_corto = descargar_precios_tiempo_real(tickers_sector)
         
-        if not precios.empty:
+        if not precios_largo.empty and not precios_corto.empty:
             resultados = []
             activos_fallidos = []
             
-            precios = precios.ffill()
-            if isinstance(precios, pd.Series):
-                precios = precios.to_frame(name=tickers_sector[0])
+            precios_largo = precios_largo.ffill()
+            precios_corto = precios_corto.ffill()
                 
             for ticker in tickers_sector:
-                if ticker not in precios.columns:
+                if ticker not in precios_largo.columns or ticker not in precios_corto.columns:
                     activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict.get(ticker, ""), "País": nacionalidad_dict.get(ticker, ""), "Motivo": "Rechazado por Yahoo Finance"})
                     continue
                     
-                serie = precios[ticker].dropna()
+                serie_larga = precios_largo[ticker].dropna()
+                serie_corta = precios_corto[ticker].dropna()
                 
-                if len(serie) < 51: 
-                    activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict.get(ticker, ""), "País": nacionalidad_dict.get(ticker, ""), "Motivo": "Historial insuficiente (< 50 días)"})
+                if len(serie_larga) < 51 or len(serie_corta) < 2: 
+                    activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict.get(ticker, ""), "País": nacionalidad_dict.get(ticker, ""), "Motivo": "Historial insuficiente"})
                     continue
-                    
-                precio_actual = float(serie.iloc[-1])
                 
                 try:
-                    ret_1d = ((precio_actual / float(serie.iloc[-2])) - 1) * 100
-                    ret_5d = ((precio_actual / float(serie.iloc[-6])) - 1) * 100
-                    ret_10d = ((precio_actual / float(serie.iloc[-11])) - 1) * 100
-                    ret_30d = ((precio_actual / float(serie.iloc[-31])) - 1) * 100
-                    ret_50d = ((precio_actual / float(serie.iloc[-51])) - 1) * 100
+                    p_act = float(serie_corta.iloc[-1])
+                    p_1d = float(serie_corta.iloc[-2])
+                    p_5d = float(serie_larga.iloc[-6]) if len(serie_larga) >= 6 else float(serie_larga.iloc[0])
+                    p_10d = float(serie_larga.iloc[-11]) if len(serie_larga) >= 11 else float(serie_larga.iloc[0])
+                    p_30d = float(serie_larga.iloc[-31]) if len(serie_larga) >= 31 else float(serie_larga.iloc[0])
+                    p_50d = float(serie_larga.iloc[-51]) if len(serie_larga) >= 51 else float(serie_larga.iloc[0])
                     
                     resultados.append({
                         "Ticker": ticker,
@@ -379,12 +428,12 @@ else:
                         "Nacionalidad": nacionalidad_dict[ticker],
                         "Sector": empresas_sector.loc[empresas_sector['Symbol_Yahoo'] == ticker, 'GICS Sector'].values[0],
                         "Peso Global": peso_dict[ticker],
-                        "Precio Actual": precio_actual,
-                        "1 Día": ret_1d,
-                        "5 Días": ret_5d,
-                        "10 Días": ret_10d,
-                        "30 Días": ret_30d,
-                        "50 Días": ret_50d
+                        "Precio Actual": p_act,
+                        "1 Día": ((p_act / p_1d) - 1) * 100,
+                        "5 Días": ((p_act / p_5d) - 1) * 100,
+                        "10 Días": ((p_act / p_10d) - 1) * 100,
+                        "30 Días": ((p_act / p_30d) - 1) * 100,
+                        "50 Días": ((p_act / p_50d) - 1) * 100
                     })
                 except Exception:
                     activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict.get(ticker, ""), "País": nacionalidad_dict.get(ticker, ""), "Motivo": "Error de cálculo interno"})
@@ -396,8 +445,7 @@ else:
                 
                 st.markdown(f"### 📈 Rendimiento Global: **{sector_elegido}**")
                 
-                estilo_df = df_resultados.style.map(dar_color, subset=['1 Día', '5 Días', '10 Días', '30 Días', '50 Días']) \
-                                               .format({
+                estilo_df = df_resultados.style.format({
                                                    "Peso Global": "{:.3f} %",
                                                    "Precio Actual": "$ {:.2f}",
                                                    "1 Día": "{:.2f} %",
