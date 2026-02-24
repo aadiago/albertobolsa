@@ -105,11 +105,13 @@ def obtener_empresas_msci_world_v2():
                 tickers_adaptados.append('JD.L')
                 continue
                 
-            if 'SEA' in nombre_empresa and ('LTD' in nombre_empresa or 'LIMITED' in nombre_empresa):
+            # Regla agresiva para Sea Limited
+            if 'SEA' in nombre_empresa and ('LTD' in nombre_empresa or 'LIMITED' in nombre_empresa or ticker_original == 'SE'):
                 tickers_adaptados.append('SE')
                 continue
                 
-            if 'BROWN' in nombre_empresa and 'FORMAN' in nombre_empresa:
+            # Regla agresiva para Brown-Forman
+            if 'BROWN FORMAN' in nombre_empresa or 'BROWN-FORMAN' in nombre_empresa:
                 tickers_adaptados.append('BF-B')
                 continue
                 
@@ -117,8 +119,13 @@ def obtener_empresas_msci_world_v2():
                 tickers_adaptados.append('BP.L')
                 continue
             
-            # Limpieza estándar
+            # --- LIMPIEZA ESTÁNDAR MEJORADA ---
+            # 1. Cambiamos puntos, espacios y barras por guiones
             ticker_base = ticker_original.replace('.', '-').replace(' ', '-').replace('/', '-')
+            
+            # 2. FULMINAMOS guiones residuales a la derecha (evita que JD. se convierta en JD-.L)
+            ticker_base = ticker_base.rstrip('-')
+            
             bolsa = str(row['Exchange']).lower()
             pais = str(row['Location']).lower()
             ticker_final = ticker_base
