@@ -15,7 +15,7 @@ if 'page' not in st.session_state:
 if 'show_bt' not in st.session_state:
     st.session_state.show_bt = False
 
-# Parámetros de Análisis (Aplicados por defecto)
+# Parámetros de Análisis
 PARAM_PERIODOS_REG = 63
 PARAM_R2_MIN = 60
 PARAM_RSI_MIN = 50
@@ -70,7 +70,6 @@ def obtener_empresas_msci_world_v9():
     
     try:
         response = requests.get(url, headers=headers)
-        
         lineas = response.text.splitlines()
         header_idx = 0
         for i, linea in enumerate(lineas):
@@ -191,6 +190,46 @@ def obtener_empresas_msci_world_v9():
         st.error(f"Error procesando el archivo de BlackRock: {e}")
         return pd.DataFrame()
 
+# MOTOR ANTIBLOQUEO: Descarga por lotes de 200 en 200
+def descargar_por_lotes(tickers_list, period):
+    df_acumulado = pd.DataFrame()
+    tamano_lote = 200
+    
+    for i in range(0, len(tickers_list), tamano_lote):
+        lote = tickers_list[i:i+tamano_lote]
+        # threads=False previene bloqueos del servidor en Streamlit Cloud
+        data = yf.download(lote, period=period, auto_adjust=True, progress=False, threads=False)
+        
+        if data.empty:
+            continue
+            
+        if isinstance(data.columns, pd.MultiIndex):
+            if 'Close' in data.columns.levels[0]:
+                df_close = data['Close']
+            elif 'Close' in data.columns.levels[1]:
+                df_close = data.xs('Close', axis=1, level=1)
+            else:
+                continue
+        else:
+            if 'Close' in data.columns:
+                if len(lote) == 1:
+                    df_close = data[['Close']].rename(columns={'Close': lote[0]})
+                else:
+                    df_close = data[['Close']]
+            else:
+                continue
+                
+        if df_acumulado.empty:
+            df_acumulado = df_close
+        else:
+            df_acumulado = pd.concat([df_acumulado, df_close], axis=1)
+            
+    # Eliminar duplicados si ocurren
+    if not df_acumulado.empty:
+        df_acumulado = df_acumulado.loc[:, ~df_acumulado.columns.duplicated()]
+        
+    return df_acumulado
+
 def descargar_precios_optimizados(tickers):
     if not tickers:
         return pd.DataFrame()
@@ -205,74 +244,25 @@ def descargar_precios_optimizados(tickers):
             pass 
             
     tickers_unicos = list(set(tickers))
-    # THREADS=FALSE para evitar el RuntimeError en Streamlit Cloud
-    data = yf.download(tickers_unicos, period="5y", auto_adjust=True, progress=False, threads=False)
+    df_final = descargar_por_lotes(tickers_unicos, "5y")
     
-    if data.empty:
-        return pd.DataFrame()
+    if not df_final.empty:
+        for f in os.listdir():
+            if f.startswith("msci_precios_cache_") and f.endswith(".csv"):
+                try:
+                    os.remove(f)
+                except Exception:
+                    pass
+        df_final.to_csv(archivo_cache)
         
-    try:
-        if isinstance(data.columns, pd.MultiIndex):
-            if 'Close' in data.columns.levels[0]:
-                df_close = data['Close']
-            elif 'Close' in data.columns.levels[1]:
-                df_close = data.xs('Close', axis=1, level=1)
-            else:
-                return pd.DataFrame()
-        else:
-            if 'Close' in data.columns:
-                if len(tickers_unicos) == 1:
-                    df_close = data[['Close']].rename(columns={'Close': tickers_unicos[0]})
-                else:
-                    df_close = data[['Close']]
-            else:
-                return pd.DataFrame()
-                
-        if not df_close.empty:
-            for f in os.listdir():
-                if f.startswith("msci_precios_cache_") and f.endswith(".csv"):
-                    try:
-                        os.remove(f)
-                    except Exception:
-                        pass
-            df_close.to_csv(archivo_cache)
-            
-        return df_close
-    except Exception:
-        return pd.DataFrame()
+    return df_final
 
 @st.cache_data(ttl=120) 
 def descargar_precios_tiempo_real(tickers):
     if not tickers:
         return pd.DataFrame()
-        
     tickers_unicos = list(set(tickers))
-    # THREADS=FALSE para evitar el RuntimeError
-    data = yf.download(tickers_unicos, period="5d", auto_adjust=True, progress=False, threads=False)
-    
-    if data.empty:
-        return pd.DataFrame()
-        
-    try:
-        if isinstance(data.columns, pd.MultiIndex):
-            if 'Close' in data.columns.levels[0]:
-                df_close = data['Close']
-            elif 'Close' in data.columns.levels[1]:
-                df_close = data.xs('Close', axis=1, level=1)
-            else:
-                return pd.DataFrame()
-        else:
-            if 'Close' in data.columns:
-                if len(tickers_unicos) == 1:
-                    df_close = data[['Close']].rename(columns={'Close': tickers_unicos[0]})
-                else:
-                    df_close = data[['Close']]
-            else:
-                return pd.DataFrame()
-                
-        return df_close
-    except Exception:
-        return pd.DataFrame()
+    return descargar_por_lotes(tickers_unicos, "5d")
 
 # --- 4. NAVEGACIÓN Y RENDERIZADO DE PANTALLAS ---
 df_msci = obtener_empresas_msci_world_v9()
@@ -298,7 +288,7 @@ else:
                 
         dias_analisis = int(opcion_dias.split()[0])
                 
-        with st.spinner(f"Calculando amplitud y ganancias de {dias_analisis} días... (Tardará unos minutos la primera vez al no usar multiproceso)"):
+        with st.spinner(f"Descargando datos por lotes de seguridad (Esto toma ~2 min la primera vez del día)..."):
             tickers_todos = df_msci['Symbol_Yahoo'].tolist()
             precios_largo = descargar_precios_optimizados(tickers_todos)
             precios_corto = descargar_precios_tiempo_real(tickers_todos)
@@ -392,7 +382,6 @@ else:
                 
                 if len(fechas) > (250 + bt_dias):
                     resultados_bt = []
-                    # Índices de rebalanceo cada X días bursátiles (últimos 250 días)
                     indices_rebalanceo = list(range(-251, -1, bt_dias))
                     
                     for i in indices_rebalanceo:
@@ -457,7 +446,6 @@ else:
                     })
                     st.dataframe(estilo_bt, use_container_width=True, hide_index=True)
                     
-                    # Cálculo de rendimiento acumulado compuesto
                     prod_top3 = ((1 + df_res_bt['Retorno Top 3']/100).prod() - 1) * 100
                     prod_msci = ((1 + df_res_bt['Retorno MSCI']/100).prod() - 1) * 100
                     
@@ -538,30 +526,4 @@ else:
                         "50 Días": ((p_act / p_50d) - 1) * 100
                     })
                 except Exception:
-                    activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict.get(ticker, ""), "País": nacionalidad_dict.get(ticker, ""), "Motivo": "Error de cálculo interno"})
-                    
-            if resultados:
-                df_resultados = pd.DataFrame(resultados)
-                df_resultados = df_resultados.sort_values(by="Peso Global", ascending=False).reset_index(drop=True)
-                df_resultados.insert(0, "#", range(1, len(df_resultados) + 1))
-                
-                st.markdown(f"### 📈 Rendimiento Global: **{sector_elegido}**")
-                
-                estilo_df = df_resultados.style.format({
-                                                   "Peso Global": "{:.3f} %",
-                                                   "Precio Actual": "$ {:.2f}",
-                                                   "1 Día": "{:.2f} %",
-                                                   "5 Días": "{:.2f} %",
-                                                   "10 Días": "{:.2f} %",
-                                                   "30 Días": "{:.2f} %",
-                                                   "50 Días": "{:.2f} %"
-                                               })
-                
-                st.dataframe(estilo_df, use_container_width=True, hide_index=True, height=600)
-            
-            if activos_fallidos:
-                st.divider()
-                st.markdown(f"### ⚠️ Activos no cargados ({len(activos_fallidos)})")
-                
-                df_fallos = pd.DataFrame(activos_fallidos)
-                st.dataframe(df_fallos, use_container_width=True, hide_index=True)
+                    activos_fallidos.append({"Ticker":
