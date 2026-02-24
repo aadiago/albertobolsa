@@ -52,9 +52,9 @@ with col_h2:
 
 st.divider()
 
-# --- 3. MOTOR DE EXTRACCIÓN Y TRADUCCIÓN DE DATOS (VERSIÓN 8 - FIX NORDICS) ---
+# --- 3. MOTOR DE EXTRACCIÓN Y TRADUCCIÓN DE DATOS (VERSIÓN 9) ---
 @st.cache_data(ttl=86400) 
-def obtener_empresas_msci_world_v8():
+def obtener_empresas_msci_world_v9():
     url = "https://www.ishares.com/us/products/239696/ishares-msci-world-etf/1467271812596.ajax?fileType=csv&fileName=URTH_holdings&dataType=fund"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"
@@ -124,8 +124,14 @@ def obtener_empresas_msci_world_v8():
                 tickers_adaptados.append('SE')
                 continue
                 
-            if ticker_upper in ['BF.B', 'BF/B', 'BF B', 'BF-B', 'BF.A']:
+            # 🛡️ FIX: Brown-Forman (BFB -> BF-B)
+            if ticker_upper in ['BFB', 'BF.B', 'BF/B', 'BF B', 'BF-B', 'BF.A', 'BFA'] or 'BROWN FORMAN' in nombre_empresa:
                 tickers_adaptados.append('BF-B')
+                continue
+                
+            # 🛡️ FIX: Heico Class A (HEIA -> HEI-A)
+            if ticker_upper in ['HEIA', 'HEI.A', 'HEI A', 'HEI/A', 'HEI-A'] or ('HEICO' in nombre_empresa and 'CLASS A' in nombre_empresa):
+                tickers_adaptados.append('HEI-A')
                 continue
                 
             if ticker_upper in ['BP.', 'BP/', 'BP'] and ('BP' in nombre_empresa or 'BRITISH' in nombre_empresa):
@@ -141,7 +147,6 @@ def obtener_empresas_msci_world_v8():
             ticker_final = ticker_base
             asignado = False
             
-            # 🛡️ REGLA EE.UU MEJORADA (Euronext y Nasdaq Nordic bypass)
             bolsas_us = ['new york', 'nasdaq', 'nyse', 'nyq', 'nms', 'united states']
             excepciones_nordicas = ['stockholm', 'helsinki', 'copenhagen', 'nordic']
             
@@ -184,9 +189,9 @@ def obtener_empresas_msci_world_v8():
         st.error(f"Error procesando el archivo de BlackRock: {e}")
         return pd.DataFrame()
 
-# 🛡️ DESCARGAS MASIVAS (v8)
+# 🛡️ DESCARGAS MASIVAS (v9)
 @st.cache_data(ttl=3600) 
-def descargar_precios_v8(tickers):
+def descargar_precios_v9(tickers):
     if not tickers:
         return pd.DataFrame()
         
@@ -224,7 +229,7 @@ def dar_color(val):
     return ''
 
 # --- 4. LÓGICA DE INTERFAZ Y CÁLCULO ---
-df_msci = obtener_empresas_msci_world_v8()
+df_msci = obtener_empresas_msci_world_v9()
 
 if not df_msci.empty:
     sectores = ["Todos los Sectores"] + sorted(df_msci['GICS Sector'].unique())
@@ -245,7 +250,7 @@ if not df_msci.empty:
     peso_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Peso_Global']))
     
     with st.spinner(f"Sincronizando {len(tickers_sector)} activos globales de forma segura..."):
-        precios = descargar_precios_v8(tickers_sector)
+        precios = descargar_precios_v9(tickers_sector)
     
     if not precios.empty:
         resultados = []
