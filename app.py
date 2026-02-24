@@ -3,7 +3,6 @@ import pandas as pd
 import yfinance as yf
 import requests
 import io
-import plotly.express as px
 
 # --- 1. CONFIGURACIÓN VISUAL Y ESTADOS ---
 st.set_page_config(layout="wide", page_title="MSCI WORLD TRACKER PRO", page_icon="🌍")
@@ -198,7 +197,6 @@ def obtener_empresas_msci_world_v9():
         st.error(f"Error procesando el archivo de BlackRock: {e}")
         return pd.DataFrame()
 
-# Ampliado a 1 año para cubrir las métricas de la pantalla principal
 @st.cache_data(ttl=3600) 
 def descargar_precios_v9(tickers):
     if not tickers:
@@ -254,12 +252,8 @@ else:
                 st.rerun()
                 
         with st.spinner("Calculando ponderaciones y rendimiento sectorial (1 año)..."):
-            # Preparar gráfico de sectores
-            sector_weights = df_msci.groupby('GICS Sector')['Peso_Global'].sum().reset_index()
-            fig = px.pie(sector_weights, values='Peso_Global', names='GICS Sector', hole=0.4, 
-                         title="Distribución de Sectores (%)")
-            fig.update_traces(textposition='inside', textinfo='percent+label')
-            fig.update_layout(showlegend=False, margin=dict(t=40, b=0, l=0, r=0))
+            # Preparar gráfico de barras nativo de Streamlit
+            sector_weights = df_msci.groupby('GICS Sector')['Peso_Global'].sum().sort_values(ascending=False)
             
             # Preparar rendimientos por sector
             tickers_todos = df_msci['Symbol_Yahoo'].tolist()
@@ -290,7 +284,6 @@ else:
                 df_retornos = pd.DataFrame(datos_retornos)
                 df_completo = pd.merge(df_msci, df_retornos, on='Symbol_Yahoo')
                 
-                # Cálculo de media ponderada por sector
                 def promedio_ponderado(group, col):
                     if group['Peso_Global'].sum() == 0: return 0
                     return (group[col] * group['Peso_Global']).sum() / group['Peso_Global'].sum()
@@ -311,7 +304,8 @@ else:
                 # Visualización Principal
                 col_chart, col_table = st.columns([1, 1.5])
                 with col_chart:
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.markdown("##### Distribución de Sectores (%)")
+                    st.bar_chart(sector_weights)
                 with col_table:
                     st.markdown("<br>", unsafe_allow_html=True)
                     estilo_resumen = df_resumen.style.map(dar_color, subset=['1 Día', '1 Mes', '3 Meses', '1 Año']) \
