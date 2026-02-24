@@ -177,109 +177,83 @@ def obtener_empresas_msci_world_v9():
             tickers_adaptados.append(ticker_final)
             
         df['Symbol_Yahoo'] = tickers_adaptados
-        
         df = df.rename(columns={
             'Name': 'Security', 
             'Sector': 'GICS Sector',
             'Location': 'Nacionalidad',
             peso_col: 'Peso_Global'
         })
-        
         return df[['Symbol_Yahoo', 'Security', 'GICS Sector', 'Nacionalidad', 'Peso_Global']]
     except Exception as e:
         st.error(f"Error procesando el archivo de BlackRock: {e}")
         return pd.DataFrame()
 
-# MOTOR ANTIBLOQUEO: Descarga por lotes de 200 en 200
+# MOTOR ANTIBLOQUEO: Lotes de 50 y float32 para ahorrar RAM
 def descargar_por_lotes(tickers_list, period):
-    df_acumulado = pd.DataFrame()
-    tamano_lote = 200
+    diccionario_series = {}
+    tamano_lote = 50
     
     for i in range(0, len(tickers_list), tamano_lote):
         lote = tickers_list[i:i+tamano_lote]
-        # threads=False previene bloqueos del servidor en Streamlit Cloud
-        data = yf.download(lote, period=period, auto_adjust=True, progress=False, threads=False)
-        
-        if data.empty:
-            continue
+        try:
+            data = yf.download(lote, period=period, auto_adjust=True, progress=False, threads=False)
+            if data.empty: continue
             
-        if isinstance(data.columns, pd.MultiIndex):
-            if 'Close' in data.columns.levels[0]:
-                df_close = data['Close']
-            elif 'Close' in data.columns.levels[1]:
-                df_close = data.xs('Close', axis=1, level=1)
+            if isinstance(data.columns, pd.MultiIndex):
+                df_close = data['Close'] if 'Close' in data.columns.levels[0] else data.xs('Close', axis=1, level=1)
             else:
-                continue
-        else:
-            if 'Close' in data.columns:
-                if len(lote) == 1:
-                    df_close = data[['Close']].rename(columns={'Close': lote[0]})
-                else:
-                    df_close = data[['Close']]
-            else:
-                continue
-                
-        if df_acumulado.empty:
-            df_acumulado = df_close
-        else:
-            df_acumulado = pd.concat([df_acumulado, df_close], axis=1)
+                df_close = data[['Close']].rename(columns={'Close': lote[0]}) if len(lote) == 1 else data[['Close']]
             
-    # Eliminar duplicados si ocurren
-    if not df_acumulado.empty:
-        df_acumulado = df_acumulado.loc[:, ~df_acumulado.columns.duplicated()]
-        
-    return df_acumulado
+            for col in df_close.columns:
+                diccionario_series[col] = df_close[col].astype('float32')
+        except Exception:
+            pass
+            
+    if diccionario_series:
+        df_final = pd.DataFrame(diccionario_series)
+        df_final = df_final.loc[:, ~df_final.columns.duplicated()]
+        return df_final
+    return pd.DataFrame()
 
 def descargar_precios_optimizados(tickers):
-    if not tickers:
-        return pd.DataFrame()
-        
+    if not tickers: return pd.DataFrame()
     hoy = date.today().strftime("%Y-%m-%d")
-    archivo_cache = f"msci_precios_cache_5y_{hoy}.csv"
+    archivo_cache = f"msci_precios_cache_3y_{hoy}.csv"
     
     if os.path.exists(archivo_cache):
-        try:
-            return pd.read_csv(archivo_cache, index_col=0, parse_dates=True)
-        except Exception:
-            pass 
+        try: return pd.read_csv(archivo_cache, index_col=0, parse_dates=True)
+        except Exception: pass 
             
     tickers_unicos = list(set(tickers))
-    df_final = descargar_por_lotes(tickers_unicos, "5y")
+    # Reducido a 3 años para mayor velocidad y menor consumo RAM
+    df_final = descargar_por_lotes(tickers_unicos, "3y")
     
     if not df_final.empty:
         for f in os.listdir():
             if f.startswith("msci_precios_cache_") and f.endswith(".csv"):
-                try:
-                    os.remove(f)
-                except Exception:
-                    pass
+                try: os.remove(f)
+                except Exception: pass
         df_final.to_csv(archivo_cache)
-        
     return df_final
 
 @st.cache_data(ttl=120) 
 def descargar_precios_tiempo_real(tickers):
-    if not tickers:
-        return pd.DataFrame()
-    tickers_unicos = list(set(tickers))
-    return descargar_por_lotes(tickers_unicos, "5d")
+    if not tickers: return pd.DataFrame()
+    return descargar_por_lotes(list(set(tickers)), "5d")
 
-# --- 4. NAVEGACIÓN Y RENDERIZADO DE PANTALLAS ---
+# --- 4. INTERFAZ ---
 df_msci = obtener_empresas_msci_world_v9()
 
 if df_msci.empty:
     st.error("Error crítico: No se ha podido cargar el universo MSCI World.")
 else:
-    # --- PANTALLA PRINCIPAL ---
     if st.session_state.page == 'main':
         col1, col_vacia, col2 = st.columns([2, 2, 1])
         with col1:
             st.subheader("Amplitud y Rendimiento por Sectores")
-            opcion_dias = st.selectbox(
-                "Configurar Ventana de Análisis:",
-                ["5 días", "10 días", "21 días", "42 días", "63 días", "126 días", "252 días"],
-                index=1
-            )
+            opcion_dias = st.selectbox("Configurar Ventana de Análisis:", 
+                                       ["5 días", "10 días", "21 días", "42 días", "63 días", "126 días", "252 días"], 
+                                       index=1)
         with col2:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("📊 Ver Componentes", use_container_width=True):
@@ -287,284 +261,98 @@ else:
                 st.rerun()
                 
         dias_analisis = int(opcion_dias.split()[0])
-                
-        with st.spinner(f"Descargando datos por lotes de seguridad (Esto toma ~2 min la primera vez del día)..."):
+        with st.spinner("Descargando historial 3 años (Bajo consumo RAM)..."):
             tickers_todos = df_msci['Symbol_Yahoo'].tolist()
             precios_largo = descargar_precios_optimizados(tickers_todos)
             precios_corto = descargar_precios_tiempo_real(tickers_todos)
             
             if not precios_largo.empty and not precios_corto.empty:
-                precios_largo = precios_largo.ffill()
-                precios_corto = precios_corto.ffill()
-                
+                precios_largo, precios_corto = precios_largo.ffill(), precios_corto.ffill()
                 datos_amplitud = []
                 for ticker in tickers_todos:
                     if ticker in precios_largo.columns and ticker in precios_corto.columns:
-                        serie_larga = precios_largo[ticker].dropna()
-                        serie_corta = precios_corto[ticker].dropna()
-                        
-                        if len(serie_larga) >= dias_analisis and not serie_corta.empty:
-                            precio_vivo = float(serie_corta.iloc[-1])
+                        serie_l, serie_c = precios_largo[ticker].dropna(), precios_corto[ticker].dropna()
+                        if len(serie_l) >= dias_analisis and not serie_c.empty:
+                            p_v = float(serie_c.iloc[-1])
+                            p_b = float(serie_l.iloc[-(dias_analisis + 1)]) if len(serie_l) > dias_analisis else float(serie_l.iloc[0])
+                            v = serie_l.tail(dias_analisis).copy()
+                            v.iloc[-1] = p_v
+                            datos_amplitud.append({'Symbol_Yahoo': ticker, 'Max': 1 if p_v >= v.max() else 0, 
+                                                   'Min': 1 if p_v <= v.min() else 0, 'Ret': ((p_v / p_b) - 1) * 100})
                             
-                            idx_base = -(dias_analisis + 1) if len(serie_larga) >= (dias_analisis + 1) else 0
-                            precio_base = float(serie_larga.iloc[idx_base])
-                            retorno_periodo = ((precio_vivo / precio_base) - 1) * 100
-                            
-                            ventana = serie_larga.tail(dias_analisis).copy()
-                            ventana.iloc[-1] = precio_vivo 
-                            
-                            max_ventana = ventana.max()
-                            min_ventana = ventana.min()
-                            
-                            es_max = 1 if precio_vivo >= max_ventana else 0
-                            es_min = 1 if precio_vivo <= min_ventana else 0
-                            
-                            datos_amplitud.append({
-                                'Symbol_Yahoo': ticker,
-                                'Maximos': es_max,
-                                'Minimos': es_min,
-                                'Retorno': retorno_periodo
-                            })
-                            
-                df_amplitud = pd.DataFrame(datos_amplitud)
-                df_completo = pd.merge(df_msci, df_amplitud, on='Symbol_Yahoo')
+                df_amp = pd.DataFrame(datos_amplitud)
+                df_c = pd.merge(df_msci, df_amp, on='Symbol_Yahoo')
                 
-                def promedio_ponderado(group, col):
-                    if group['Peso_Global'].sum() == 0: return 0
-                    return (group[col] * group['Peso_Global']).sum() / group['Peso_Global'].sum()
+                resumen = []
+                for sector, group in df_c.groupby('GICS Sector'):
+                    tot = len(group)
+                    dif = group['Max'].sum() - group['Min'].sum()
+                    resumen.append({'Sector': sector, 'Peso (%)': group['Peso_Global'].sum(),
+                                    f'Dif. Neta % ({opcion_dias})': (dif/tot)*100 if tot > 0 else 0,
+                                    f'Rendimiento ({opcion_dias})': (group['Ret'] * group['Peso_Global']).sum() / group['Peso_Global'].sum()})
                 
-                resumen_sectores = []
-                for sector, group in df_completo.groupby('GICS Sector'):
-                    total_activos = len(group)
-                    total_maximos = group['Maximos'].sum()
-                    total_minimos = group['Minimos'].sum()
-                    diferencia_neta = total_maximos - total_minimos
-                    
-                    dif_neta_pct = (diferencia_neta / total_activos) * 100 if total_activos > 0 else 0
-                    retorno_sector = promedio_ponderado(group, 'Retorno')
-                    
-                    resumen_sectores.append({
-                        'Sector': sector,
-                        'Peso (%)': group['Peso_Global'].sum(),
-                        f'Dif. Neta % ({opcion_dias})': dif_neta_pct,
-                        f'Rendimiento ({opcion_dias})': retorno_sector
-                    })
-                    
-                df_resumen = pd.DataFrame(resumen_sectores).sort_values(by='Peso (%)', ascending=False)
-                
-                st.markdown("<br>", unsafe_allow_html=True)
-                estilo_resumen = df_resumen.style.format({
-                                                     "Peso (%)": "{:.2f} %",
-                                                     f'Dif. Neta % ({opcion_dias})': "{:.2f} %",
-                                                     f'Rendimiento ({opcion_dias})': "{:.2f} %"
-                                                 })
-                st.dataframe(estilo_resumen, use_container_width=True, hide_index=True, height=480)
-        
-        # --- SECCIÓN DE BACKTESTING ---
+                st.dataframe(pd.DataFrame(resumen).sort_values('Peso (%)', ascending=False).style.format({
+                    "Peso (%)": "{:.2f} %", f'Dif. Neta % ({opcion_dias})': "{:.2f} %", f'Rendimiento ({opcion_dias})': "{:.2f} %"
+                }), use_container_width=True, hide_index=True, height=480)
+
+        # --- BACKTESTING ---
         st.divider()
-        col_bt1, col_bt2, col_bt3 = st.columns([1, 2, 1])
+        col_bt1, col_bt2, _ = st.columns([1, 2, 1])
         with col_bt1:
-            opcion_bt_dias = st.selectbox(
-                "Ventana de Backtest:",
-                ["10 días", "21 días", "42 días", "63 días", "126 días", "252 días"],
-                index=0
-            )
-            bt_dias = int(opcion_bt_dias.split()[0])
-            
+            bt_dias = int(st.selectbox("Ventana de Backtest:", ["10 días", "21 días", "42 días", "63 días", "126 días", "252 días"]).split()[0])
         with col_bt2:
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("⚙️ Ejecutar Backtest: Top 3 Sectores vs MSCI World (Últ. 250 días)", use_container_width=True):
+            if st.button("⚙️ Ejecutar Backtest: Top 3 Sectores vs MSCI World (Últ. 250 días)"):
                 st.session_state.show_bt = True
-                
+        
         if st.session_state.show_bt:
-            with st.spinner(f"Simulando estrategia histórica (Evaluación cada {bt_dias} días, últimos 250 días)..."):
+            with st.spinner("Simulando estrategia..."):
                 fechas = precios_largo.index
-                
                 if len(fechas) > (250 + bt_dias):
-                    resultados_bt = []
-                    indices_rebalanceo = list(range(-251, -1, bt_dias))
+                    resultados = []
+                    for i in list(range(-251, -1, bt_dias)):
+                        f_i, f_f = fechas[i], fechas[i+bt_dias] if (i+bt_dias) < 0 else fechas[-1]
+                        v_p = precios_largo.iloc[i-bt_dias:i+1]
+                        p_v = v_p.iloc[-1]
+                        es_max, es_min = (p_v >= v_p.max()).astype(int), (p_v <= v_p.min()).astype(int)
+                        df_bt = pd.merge(df_msci, pd.DataFrame({'Max': es_max, 'Min': es_min}), left_on='Symbol_Yahoo', right_index=True)
+                        rk = []
+                        for s, g in df_bt.groupby('GICS Sector'):
+                            rk.append({'Sector': s, 'Dif': ((g['Max'].sum()-g['Min'].sum())/len(g))*100 if len(g)>0 else 0})
+                        top_3 = pd.DataFrame(rk).sort_values('Dif', ascending=False).head(3)['Sector'].tolist()
+                        ret_a = ((precios_largo.iloc[i+bt_dias if (i+bt_dias)<0 else -1] / precios_largo.iloc[i]) - 1) * 100
+                        df_e = pd.merge(df_msci, pd.DataFrame({'Ret': ret_a}), left_on='Symbol_Yahoo', right_index=True)
+                        r_msci = (df_e['Ret'] * df_e['Peso_Global']).sum() / df_e['Peso_Global'].sum()
+                        df_t3 = df_e[df_e['GICS Sector'].isin(top_3)]
+                        r_t3 = (df_t3['Ret'] * df_t3['Peso_Global']).sum() / df_t3['Peso_Global'].sum()
+                        resultados.append({'Periodo': f"{f_i.strftime('%d/%m/%y')} - {f_f.strftime('%d/%m/%y')}", 'Top 3': ", ".join(top_3), 'Ret T3': r_t3, 'Ret MSCI': r_msci, 'Dif': r_t3 - r_msci})
                     
-                    for i in indices_rebalanceo:
-                        fecha_inicio = fechas[i]
-                        fecha_fin = fechas[i+bt_dias] if (i+bt_dias) < 0 else fechas[-1]
-                        
-                        inicio_ventana = i - bt_dias
-                        if inicio_ventana < -len(precios_largo):
-                            inicio_ventana = -len(precios_largo)
-                            
-                        ventana_precios = precios_largo.iloc[inicio_ventana:i+1]
-                        
-                        precio_vivo = ventana_precios.iloc[-1]
-                        max_ventana = ventana_precios.max()
-                        min_ventana = ventana_precios.min()
-                        
-                        es_max = (precio_vivo >= max_ventana).astype(int)
-                        es_min = (precio_vivo <= min_ventana).astype(int)
-                        
-                        datos_amp = pd.DataFrame({'Maximos': es_max, 'Minimos': es_min})
-                        df_bt = pd.merge(df_msci, datos_amp, left_on='Symbol_Yahoo', right_index=True)
-                        
-                        ranking = []
-                        for sector, group in df_bt.groupby('GICS Sector'):
-                            tot = len(group)
-                            dif = group['Maximos'].sum() - group['Minimos'].sum()
-                            pct = (dif / tot) * 100 if tot > 0 else 0
-                            ranking.append({'Sector': sector, 'Dif': pct})
-                            
-                        ranking_df = pd.DataFrame(ranking).sort_values('Dif', ascending=False)
-                        top_3 = ranking_df.head(3)['Sector'].tolist()
-                        
-                        precios_inicio = precios_largo.iloc[i]
-                        precios_fin = precios_largo.iloc[i+bt_dias] if (i+bt_dias) < 0 else precios_largo.iloc[-1]
-                        
-                        retornos_activos = ((precios_fin / precios_inicio) - 1) * 100
-                        df_ret = pd.DataFrame({'Retorno': retornos_activos})
-                        df_eval = pd.merge(df_msci, df_ret, left_on='Symbol_Yahoo', right_index=True)
-                        
-                        peso_msci = df_eval['Peso_Global'].sum()
-                        retorno_msci = (df_eval['Retorno'] * df_eval['Peso_Global']).sum() / peso_msci if peso_msci > 0 else 0
-                        
-                        df_top3 = df_eval[df_eval['GICS Sector'].isin(top_3)]
-                        peso_top3 = df_top3['Peso_Global'].sum()
-                        retorno_top3 = (df_top3['Retorno'] * df_top3['Peso_Global']).sum() / peso_top3 if peso_top3 > 0 else 0
-                        
-                        resultados_bt.append({
-                            'Periodo': f"{fecha_inicio.strftime('%d/%m/%y')} - {fecha_fin.strftime('%d/%m/%y')}",
-                            'Sectores Top 3': ", ".join(top_3),
-                            'Retorno Top 3': retorno_top3,
-                            'Retorno MSCI': retorno_msci,
-                            'Diferencia': retorno_top3 - retorno_msci
-                        })
-                        
-                    df_res_bt = pd.DataFrame(resultados_bt)
-                    
-                    st.markdown(f"### 📊 Resultados Simulación Anual (Ventana/Rebalanceo {bt_dias}d)")
-                    estilo_bt = df_res_bt.style.format({
-                        'Retorno Top 3': "{:.2f} %",
-                        'Retorno MSCI': "{:.2f} %",
-                        'Diferencia': "{:.2f} %"
-                    })
-                    st.dataframe(estilo_bt, use_container_width=True, hide_index=True)
-                    
-                    prod_top3 = ((1 + df_res_bt['Retorno Top 3']/100).prod() - 1) * 100
-                    prod_msci = ((1 + df_res_bt['Retorno MSCI']/100).prod() - 1) * 100
-                    
-                    col_r1, col_r2, col_r3 = st.columns(3)
-                    col_r1.metric("Acumulado Estrategia Top 3", f"{prod_top3:.2f} %")
-                    col_r2.metric("Acumulado MSCI World", f"{prod_msci:.2f} %")
-                    col_r3.metric("Alpha Generado (1 Año)", f"{(prod_top3 - prod_msci):.2f} %")
-                    
-                else:
-                    st.warning(f"Historial insuficiente. Se necesitan {250 + bt_dias} días bursátiles para el backtesting.")
+                    df_res = pd.DataFrame(resultados)
+                    st.dataframe(df_res.style.format({'Ret T3': "{:.2f}%", 'Ret MSCI': "{:.2f}%", 'Dif': "{:.2f}%"}), use_container_width=True, hide_index=True)
+                    p_t3, p_msci = ((1 + df_res['Ret T3']/100).prod()-1)*100, ((1 + df_res['Ret MSCI']/100).prod()-1)*100
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Acum. Estrategia", f"{p_t3:.2f}%")
+                    c2.metric("Acum. MSCI World", f"{p_msci:.2f}%")
+                    c3.metric("Alpha (1 Año)", f"{(p_t3 - p_msci):.2f}%")
+                else: st.warning("Historial insuficiente.")
 
-    # --- PANTALLA SECUNDARIA (COMPONENTES) ---
     elif st.session_state.page == 'components':
-        if st.button("⬅️ Volver al Resumen Principal"):
+        if st.button("⬅️ Volver"):
             st.session_state.page = 'main'
             st.rerun()
-            
-        st.divider()
-        sectores = ["Todos los Sectores"] + sorted(df_msci['GICS Sector'].unique())
-        
-        col_sel, col_empty = st.columns([1, 3])
-        with col_sel:
-            sector_elegido = st.selectbox("🎯 Selecciona un Sector Global (MSCI World):", sectores)
-        
-        if sector_elegido == "Todos los Sectores":
-            empresas_sector = df_msci
-        else:
-            empresas_sector = df_msci[df_msci['GICS Sector'] == sector_elegido]
-            
-        tickers_sector = empresas_sector['Symbol_Yahoo'].tolist()
-        
-        nombres_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Security']))
-        nacionalidad_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Nacionalidad']))
-        peso_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Peso_Global']))
-        
-        with st.spinner(f"Sincronizando {len(tickers_sector)} activos..."):
-            precios_largo = descargar_precios_optimizados(tickers_sector)
-            precios_corto = descargar_precios_tiempo_real(tickers_sector)
-        
-        if not precios_largo.empty and not precios_corto.empty:
-            resultados = []
-            activos_fallidos = []
-            
-            precios_largo = precios_largo.ffill()
-            precios_corto = precios_corto.ffill()
-                
-            for ticker in tickers_sector:
-                if ticker not in precios_largo.columns or ticker not in precios_corto.columns:
-                    activos_fallidos.append({
-                        "Ticker": ticker, 
-                        "Empresa": nombres_dict.get(ticker, ""), 
-                        "País": nacionalidad_dict.get(ticker, ""), 
-                        "Motivo": "Rechazado por Yahoo Finance"
-                    })
-                    continue
-                    
-                serie_larga = precios_largo[ticker].dropna()
-                serie_corta = precios_corto[ticker].dropna()
-                
-                if len(serie_larga) < 51 or len(serie_corta) < 2: 
-                    activos_fallidos.append({
-                        "Ticker": ticker, 
-                        "Empresa": nombres_dict.get(ticker, ""), 
-                        "País": nacionalidad_dict.get(ticker, ""), 
-                        "Motivo": "Historial insuficiente"
-                    })
-                    continue
-                
-                try:
-                    p_act = float(serie_corta.iloc[-1])
-                    p_1d = float(serie_corta.iloc[-2])
-                    p_5d = float(serie_larga.iloc[-6]) if len(serie_larga) >= 6 else float(serie_larga.iloc[0])
-                    p_10d = float(serie_larga.iloc[-11]) if len(serie_larga) >= 11 else float(serie_larga.iloc[0])
-                    p_30d = float(serie_larga.iloc[-31]) if len(serie_larga) >= 31 else float(serie_larga.iloc[0])
-                    p_50d = float(serie_larga.iloc[-51]) if len(serie_larga) >= 51 else float(serie_larga.iloc[0])
-                    
-                    resultados.append({
-                        "Ticker": ticker,
-                        "Empresa": nombres_dict[ticker],
-                        "Nacionalidad": nacionalidad_dict[ticker],
-                        "Sector": empresas_sector.loc[empresas_sector['Symbol_Yahoo'] == ticker, 'GICS Sector'].values[0],
-                        "Peso Global": peso_dict[ticker],
-                        "Precio Actual": p_act,
-                        "1 Día": ((p_act / p_1d) - 1) * 100,
-                        "5 Días": ((p_act / p_5d) - 1) * 100,
-                        "10 Días": ((p_act / p_10d) - 1) * 100,
-                        "30 Días": ((p_act / p_30d) - 1) * 100,
-                        "50 Días": ((p_act / p_50d) - 1) * 100
-                    })
-                except Exception:
-                    activos_fallidos.append({
-                        "Ticker": ticker, 
-                        "Empresa": nombres_dict.get(ticker, ""), 
-                        "País": nacionalidad_dict.get(ticker, ""), 
-                        "Motivo": "Error de cálculo interno"
-                    })
-                    
-            if resultados:
-                df_resultados = pd.DataFrame(resultados)
-                df_resultados = df_resultados.sort_values(by="Peso Global", ascending=False).reset_index(drop=True)
-                df_resultados.insert(0, "#", range(1, len(df_resultados) + 1))
-                
-                st.markdown(f"### 📈 Rendimiento Global: **{sector_elegido}**")
-                
-                estilo_df = df_resultados.style.format({
-                                                   "Peso Global": "{:.3f} %",
-                                                   "Precio Actual": "$ {:.2f}",
-                                                   "1 Día": "{:.2f} %",
-                                                   "5 Días": "{:.2f} %",
-                                                   "10 Días": "{:.2f} %",
-                                                   "30 Días": "{:.2f} %",
-                                                   "50 Días": "{:.2f} %"
-                                               })
-                
-                st.dataframe(estilo_df, use_container_width=True, hide_index=True, height=600)
-            
-            if activos_fallidos:
-                st.divider()
-                st.markdown(f"### ⚠️ Activos no cargados ({len(activos_fallidos)})")
-                
-                df_fallos = pd.DataFrame(activos_fallidos)
-                st.dataframe(df_fallos, use_container_width=True, hide_index=True)
+        s = ["Todos"] + sorted(df_msci['GICS Sector'].unique())
+        sec = st.selectbox("🎯 Sector:", s)
+        emp = df_msci if sec == "Todos" else df_msci[df_msci['GICS Sector'] == sec]
+        with st.spinner("Sincronizando..."):
+            p_l, p_c = descargar_precios_optimizados(emp['Symbol_Yahoo'].tolist()), descargar_precios_tiempo_real(emp['Symbol_Yahoo'].tolist())
+        if not p_l.empty and not p_c.empty:
+            res = []
+            p_l, p_c = p_l.ffill(), p_c.ffill()
+            for t in emp['Symbol_Yahoo'].tolist():
+                if t in p_l.columns and t in p_c.columns:
+                    sl, sc = p_l[t].dropna(), p_c[t].dropna()
+                    if len(sl) >= 51 and len(sc) >= 2:
+                        pa = float(sc.iloc[-1])
+                        res.append({"Ticker": t, "Security": emp[emp['Symbol_Yahoo']==t]['Security'].values[0], "Peso": emp[emp['Symbol_Yahoo']==t]['Peso_Global'].values[0], "Precio": pa,
+                                    "1D": ((pa/float(sc.iloc[-2]))-1)*100, "5D": ((pa/float(sl.iloc[-6]))-1)*100, "30D": ((pa/float(sl.iloc[-31]))-1)*100, "50D": ((pa/float(sl.iloc[-51]))-1)*100})
+            st.dataframe(pd.DataFrame(res).sort_values("Peso", ascending=False).style.format({"Peso": "{:.3f}%", "Precio": "$ {:.2f}", "1D": "{:.2f}%", "5D": "{:.2f}%", "30D": "{:.2f}%", "50D": "{:.2f}%"}), use_container_width=True, hide_index=True)
