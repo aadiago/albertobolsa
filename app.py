@@ -205,8 +205,8 @@ def descargar_precios_optimizados(tickers):
             pass 
             
     tickers_unicos = list(set(tickers))
-    # Ampliado a 5 años para asegurar datos en ventanas muy largas (252) y backtesting
-    data = yf.download(tickers_unicos, period="5y", auto_adjust=True, progress=False, threads=True)
+    # threads=False previene bloqueos del servidor (RuntimeError) en Streamlit Cloud
+    data = yf.download(tickers_unicos, period="5y", auto_adjust=True, progress=False, threads=False)
     
     if data.empty:
         return pd.DataFrame()
@@ -247,7 +247,8 @@ def descargar_precios_tiempo_real(tickers):
         return pd.DataFrame()
         
     tickers_unicos = list(set(tickers))
-    data = yf.download(tickers_unicos, period="5d", auto_adjust=True, progress=False, threads=True)
+    # threads=False por la misma razón que el histórico
+    data = yf.download(tickers_unicos, period="5d", auto_adjust=True, progress=False, threads=False)
     
     if data.empty:
         return pd.DataFrame()
@@ -297,7 +298,7 @@ else:
                 
         dias_analisis = int(opcion_dias.split()[0])
                 
-        with st.spinner(f"Calculando amplitud y ganancias de {dias_analisis} días en tiempo real (leyendo 5 años de datos)..."):
+        with st.spinner(f"Calculando amplitud y ganancias de {dias_analisis} días en tiempo real... esto puede tardar unos minutos la primera vez (descarga segura sin crasheo)."):
             tickers_todos = df_msci['Symbol_Yahoo'].tolist()
             precios_largo = descargar_precios_optimizados(tickers_todos)
             precios_corto = descargar_precios_tiempo_real(tickers_todos)
@@ -399,7 +400,6 @@ else:
                         fecha_fin = fechas[i+bt_dias] if (i+bt_dias) < 0 else fechas[-1]
                         
                         inicio_ventana = i - bt_dias
-                        # Por seguridad en caso de que falten días al inicio de la serie
                         if inicio_ventana < -len(precios_largo):
                             inicio_ventana = -len(precios_largo)
                             
@@ -493,7 +493,7 @@ else:
         nacionalidad_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Nacionalidad']))
         peso_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Peso_Global']))
         
-        with st.spinner(f"Sincronizando {len(tickers_sector)} activos en tiempo real..."):
+        with st.spinner(f"Sincronizando {len(tickers_sector)} activos..."):
             precios_largo = descargar_precios_optimizados(tickers_sector)
             precios_corto = descargar_precios_tiempo_real(tickers_sector)
         
