@@ -104,6 +104,14 @@ def obtener_empresas_msci_world_v9():
             nombre_empresa = str(row['Name']).upper()
             
             # --- EXCEPCIONES DIRECTAS ---
+            if 'CONSTELLATION SOFTWARE' in nombre_empresa:
+                tickers_adaptados.append('CSU.TO')
+                continue
+                
+            if 'CAPITALAND INTEGRATED' in nombre_empresa:
+                tickers_adaptados.append('M3T.F')
+                continue
+                
             if 'BERKSHIRE' in nombre_empresa:
                 tickers_adaptados.append('BRK-B')
                 continue
