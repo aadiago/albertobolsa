@@ -12,7 +12,10 @@ st.set_page_config(layout="wide", page_title="MSCI WORLD TRACKER PRO", page_icon
 if 'page' not in st.session_state:
     st.session_state.page = 'main'
 
-# Parámetros de Análisis (Aplicados por defecto según tu configuración)
+if 'show_bt' not in st.session_state:
+    st.session_state.show_bt = False
+
+# Parámetros de Análisis (Aplicados por defecto)
 PARAM_PERIODOS_REG = 63
 PARAM_R2_MIN = 60
 PARAM_RSI_MIN = 50
@@ -108,7 +111,6 @@ def obtener_empresas_msci_world_v9():
             ticker_upper = ticker_original.upper()
             nombre_empresa = str(row['Name']).upper()
             
-            # --- EXCEPCIONES DIRECTAS ---
             if 'CONSTELLATION SOFTWARE' in nombre_empresa:
                 tickers_adaptados.append('CSU.TO')
                 continue
@@ -292,7 +294,6 @@ else:
                 st.session_state.page = 'components'
                 st.rerun()
                 
-        # Mapeo del selector a enteros
         dias_analisis = int(opcion_dias.split()[0])
                 
         with st.spinner(f"Calculando amplitud y ganancias de {dias_analisis} días en tiempo real..."):
@@ -311,15 +312,12 @@ else:
                         serie_corta = precios_corto[ticker].dropna()
                         
                         if len(serie_larga) >= dias_analisis and not serie_corta.empty:
-                            # Tomamos el precio en tiempo real
                             precio_vivo = float(serie_corta.iloc[-1])
                             
-                            # Identificamos el precio base (de hace 'X' días) para calcular las ganancias
                             idx_base = -(dias_analisis + 1) if len(serie_larga) >= (dias_analisis + 1) else 0
                             precio_base = float(serie_larga.iloc[idx_base])
                             retorno_periodo = ((precio_vivo / precio_base) - 1) * 100
                             
-                            # Aislamos la ventana temporal para máximos/mínimos
                             ventana = serie_larga.tail(dias_analisis).copy()
                             ventana.iloc[-1] = precio_vivo 
                             
@@ -350,9 +348,7 @@ else:
                     total_minimos = group['Minimos'].sum()
                     diferencia_neta = total_maximos - total_minimos
                     
-                    # Calcular el porcentaje en función del número de valores procesados en este sector
                     dif_neta_pct = (diferencia_neta / total_activos) * 100 if total_activos > 0 else 0
-                    
                     retorno_sector = promedio_ponderado(group, 'Retorno')
                     
                     resumen_sectores.append({
@@ -371,6 +367,93 @@ else:
                                                      f'Rendimiento ({opcion_dias})': "{:.2f} %"
                                                  })
                 st.dataframe(estilo_resumen, use_container_width=True, hide_index=True, height=480)
+        
+        # --- SECCIÓN DE BACKTESTING ---
+        st.divider()
+        col_bt1, col_bt2, col_bt3 = st.columns([1, 2, 1])
+        with col_bt2:
+            if st.button("⚙️ Ejecutar Backtest: Top 3 Sectores vs MSCI World (Últ. 50 días)", use_container_width=True):
+                st.session_state.show_bt = not st.session_state.show_bt
+                
+        if st.session_state.show_bt:
+            with st.spinner("Simulando estrategia histórica (Evaluación cada 10 días)..."):
+                fechas = precios_largo.index
+                
+                if len(fechas) > 60:
+                    resultados_bt = []
+                    # Índices de rebalanceo exactos cada 10 días bursátiles
+                    indices_rebalanceo = [-51, -41, -31, -21, -11]
+                    
+                    for i in indices_rebalanceo:
+                        fecha_inicio = fechas[i]
+                        fecha_fin = fechas[i+10] if (i+10) < 0 else fechas[-1]
+                        
+                        inicio_ventana = i - 10
+                        ventana_precios = precios_largo.iloc[inicio_ventana:i+1]
+                        
+                        precio_vivo = ventana_precios.iloc[-1]
+                        max_ventana = ventana_precios.max()
+                        min_ventana = ventana_precios.min()
+                        
+                        es_max = (precio_vivo >= max_ventana).astype(int)
+                        es_min = (precio_vivo <= min_ventana).astype(int)
+                        
+                        datos_amp = pd.DataFrame({'Maximos': es_max, 'Minimos': es_min})
+                        df_bt = pd.merge(df_msci, datos_amp, left_on='Symbol_Yahoo', right_index=True)
+                        
+                        ranking = []
+                        for sector, group in df_bt.groupby('GICS Sector'):
+                            tot = len(group)
+                            dif = group['Maximos'].sum() - group['Minimos'].sum()
+                            pct = (dif / tot) * 100 if tot > 0 else 0
+                            ranking.append({'Sector': sector, 'Dif': pct})
+                            
+                        ranking_df = pd.DataFrame(ranking).sort_values('Dif', ascending=False)
+                        top_3 = ranking_df.head(3)['Sector'].tolist()
+                        
+                        precios_inicio = precios_largo.iloc[i]
+                        precios_fin = precios_largo.iloc[i+10] if (i+10) < 0 else precios_largo.iloc[-1]
+                        
+                        retornos_activos = ((precios_fin / precios_inicio) - 1) * 100
+                        df_ret = pd.DataFrame({'Retorno': retornos_activos})
+                        df_eval = pd.merge(df_msci, df_ret, left_on='Symbol_Yahoo', right_index=True)
+                        
+                        peso_msci = df_eval['Peso_Global'].sum()
+                        retorno_msci = (df_eval['Retorno'] * df_eval['Peso_Global']).sum() / peso_msci if peso_msci > 0 else 0
+                        
+                        df_top3 = df_eval[df_eval['GICS Sector'].isin(top_3)]
+                        peso_top3 = df_top3['Peso_Global'].sum()
+                        retorno_top3 = (df_top3['Retorno'] * df_top3['Peso_Global']).sum() / peso_top3 if peso_top3 > 0 else 0
+                        
+                        resultados_bt.append({
+                            'Periodo': f"{fecha_inicio.strftime('%d/%m')} - {fecha_fin.strftime('%d/%m')}",
+                            'Sectores Top 3': ", ".join(top_3),
+                            'Retorno Top 3': retorno_top3,
+                            'Retorno MSCI': retorno_msci,
+                            'Diferencia': retorno_top3 - retorno_msci
+                        })
+                        
+                    df_res_bt = pd.DataFrame(resultados_bt)
+                    
+                    st.markdown("### 📊 Resultados Simulación (Ventana/Rebalanceo 10d)")
+                    estilo_bt = df_res_bt.style.format({
+                        'Retorno Top 3': "{:.2f} %",
+                        'Retorno MSCI': "{:.2f} %",
+                        'Diferencia': "{:.2f} %"
+                    })
+                    st.dataframe(estilo_bt, use_container_width=True, hide_index=True)
+                    
+                    # Cálculo de rendimiento acumulado compuesto
+                    prod_top3 = ((1 + df_res_bt['Retorno Top 3']/100).prod() - 1) * 100
+                    prod_msci = ((1 + df_res_bt['Retorno MSCI']/100).prod() - 1) * 100
+                    
+                    col_r1, col_r2, col_r3 = st.columns(3)
+                    col_r1.metric("Acumulado Estrategia Top 3", f"{prod_top3:.2f} %")
+                    col_r2.metric("Acumulado MSCI World", f"{prod_msci:.2f} %")
+                    col_r3.metric("Alpha Generado", f"{(prod_top3 - prod_msci):.2f} %")
+                    
+                else:
+                    st.warning("Historial insuficiente. Se necesitan 60 días para el backtesting de 50.")
 
     # --- PANTALLA SECUNDARIA (COMPONENTES) ---
     elif st.session_state.page == 'components':
