@@ -44,9 +44,9 @@ with col_h2:
 
 st.divider()
 
-# --- 3. MOTOR DE EXTRACCIÓN Y TRADUCCIÓN DE DATOS ---
-@st.cache_data(ttl=86400) # Cachear 1 día
-def obtener_empresas_msci_world():
+# --- 3. MOTOR DE EXTRACCIÓN Y TRADUCCIÓN DE DATOS (VERSIÓN 2 - BYPASS CACHÉ) ---
+@st.cache_data(ttl=86400) 
+def obtener_empresas_msci_world_v2():
     url = "https://www.ishares.com/us/products/239696/ishares-msci-world-etf/1467271812596.ajax?fileType=csv&fileName=URTH_holdings&dataType=fund"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"
@@ -64,6 +64,19 @@ def obtener_empresas_msci_world():
                 break
                 
         df = pd.read_csv(io.StringIO(response.text), skiprows=header_idx)
+        
+        # 🛡️ Limpieza de espacios invisibles en las columnas (Evita el KeyError)
+        df.columns = df.columns.str.strip()
+        
+        # Adaptación para variaciones en el nombre de la columna de peso
+        if 'Weight (%)' in df.columns:
+            peso_col = 'Weight (%)'
+        elif 'Weight' in df.columns:
+            peso_col = 'Weight'
+        else:
+            df['Peso_Falso'] = 0.0
+            peso_col = 'Peso_Falso'
+            
         df = df.dropna(subset=['Ticker', 'Sector'])
         df = df[df['Asset Class'] == 'Equity']
         
@@ -106,12 +119,12 @@ def obtener_empresas_msci_world():
             
         df['Symbol_Yahoo'] = tickers_adaptados
         
-        # Renombrar para mantener compatibilidad
+        # Renombrar columnas
         df = df.rename(columns={
             'Name': 'Security', 
             'Sector': 'GICS Sector',
             'Location': 'Nacionalidad',
-            'Weight (%)': 'Peso_Global'
+            peso_col: 'Peso_Global'
         })
         
         return df[['Symbol_Yahoo', 'Security', 'GICS Sector', 'Nacionalidad', 'Peso_Global']]
@@ -119,15 +132,22 @@ def obtener_empresas_msci_world():
         st.error(f"Error procesando el archivo de BlackRock: {e}")
         return pd.DataFrame()
 
-@st.cache_data(ttl=3600) # Cachear precios 1 hora
+@st.cache_data(ttl=3600) 
 def descargar_precios(tickers):
     data = yf.download(tickers, period="4mo", auto_adjust=True, progress=False)
     if 'Close' in data:
         return data['Close']
     return data
 
+# --- Lógica de colores para la tabla ---
+def dar_color(val):
+    if isinstance(val, (int, float)):
+        color = '#d4edda' if val > 0 else '#f8d7da' if val < 0 else 'white'
+        return f'background-color: {color}; color: #155724 if val > 0 else #721c24'
+    return ''
+
 # --- 4. LÓGICA DE INTERFAZ Y CÁLCULO ---
-df_msci = obtener_empresas_msci_world()
+df_msci = obtener_empresas_msci_world_v2()
 
 if not df_msci.empty:
     sectores = sorted(df_msci['GICS Sector'].unique())
@@ -157,13 +177,13 @@ if not df_msci.empty:
             
         for ticker in tickers_sector:
             if ticker not in precios.columns:
-                activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict[ticker], "Motivo": "No encontrado en Yahoo Finance"})
+                activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict[ticker], "País": nacionalidad_dict[ticker], "Motivo": "No encontrado en Yahoo Finance"})
                 continue
                 
             serie = precios[ticker].dropna()
             
             if len(serie) < 51: 
-                activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict[ticker], "Motivo": "Historial insuficiente (< 50 días)"})
+                activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict[ticker], "País": nacionalidad_dict[ticker], "Motivo": "Historial insuficiente (< 50 días)"})
                 continue
                 
             precio_actual = float(serie.iloc[-1])
@@ -188,32 +208,29 @@ if not df_msci.empty:
                     "50 Días": ret_50d
                 })
             except Exception:
-                activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict[ticker], "Motivo": "Error de cálculo"})
+                activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict[ticker], "País": nacionalidad_dict[ticker], "Motivo": "Error de cálculo"})
                 
         # --- 5. VISUALIZACIÓN DE RESULTADOS ---
         if resultados:
             df_resultados = pd.DataFrame(resultados)
-            # Ordenamos por el peso en el índice para ver los gigantes primero
             df_resultados = df_resultados.sort_values(by="Peso Global", ascending=False).reset_index(drop=True)
             df_resultados.insert(0, "#", range(1, len(df_resultados) + 1))
             
             st.markdown(f"### 📈 Rendimiento Global: **{sector_elegido}**")
             
-            column_config = {
-                "#": st.column_config.NumberColumn("#", width="small"),
-                "Ticker": st.column_config.TextColumn("Ticker", width="small"),
-                "Empresa": st.column_config.TextColumn("Empresa", width="medium"),
-                "Nacionalidad": st.column_config.TextColumn("País", width="small"),
-                "Peso Global": st.column_config.NumberColumn("Peso (%)", format="%.3f %%"),
-                "Precio Actual": st.column_config.NumberColumn("Cierre", format="%.2f"),
-                "1 Día": st.column_config.NumberColumn("1 Día", format="%.2f %%"),
-                "5 Días": st.column_config.NumberColumn("5 Días", format="%.2f %%"),
-                "10 Días": st.column_config.NumberColumn("10 Días", format="%.2f %%"),
-                "30 Días": st.column_config.NumberColumn("30 Días", format="%.2f %%"),
-                "50 Días": st.column_config.NumberColumn("50 Días", format="%.2f %%"),
-            }
+            # Aplicamos el estilo de color a las columnas de retorno
+            estilo_df = df_resultados.style.map(dar_color, subset=['1 Día', '5 Días', '10 Días', '30 Días', '50 Días']) \
+                                           .format({
+                                               "Peso Global": "{:.3f} %",
+                                               "Precio Actual": "$ {:.2f}",
+                                               "1 Día": "{:.2f} %",
+                                               "5 Días": "{:.2f} %",
+                                               "10 Días": "{:.2f} %",
+                                               "30 Días": "{:.2f} %",
+                                               "50 Días": "{:.2f} %"
+                                           })
             
-            st.dataframe(df_resultados, use_container_width=True, hide_index=True, column_config=column_config, height=600)
+            st.dataframe(estilo_df, use_container_width=True, hide_index=True, height=600)
         
         # --- 6. REPORTE DE ACTIVOS FALLIDOS ---
         if activos_fallidos:
@@ -223,4 +240,4 @@ if not df_msci.empty:
             df_fallos = pd.DataFrame(activos_fallidos)
             st.dataframe(df_fallos, use_container_width=True, hide_index=True)
 else:
-    st.error("Error crítico: No se ha podido cargar el universo MSCI World.")
+    st.error("Error crítico: No se ha podido cargar el universo MSCI World. Verifica tu conexión a internet o los servidores de iShares.")
