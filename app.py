@@ -4,8 +4,16 @@ import yfinance as yf
 import requests
 import io
 
-# --- 1. CONFIGURACIÓN VISUAL ---
+# --- 1. CONFIGURACIÓN VISUAL Y PARÁMETROS DE ESTRATEGIA ---
 st.set_page_config(layout="wide", page_title="MSCI WORLD TRACKER PRO", page_icon="🌍")
+
+# Parámetros de Análisis Listos para Implementar
+PARAM_PERIODOS_REG = 63
+PARAM_R2_MIN = 60
+PARAM_RSI_MIN = 50
+PARAM_MAX_ULCER = 3.0
+PARAM_MAX_DIST_MEDIA = 10
+PARAM_VELOCITY = 30
 
 st.markdown("""
     <style>
@@ -44,9 +52,9 @@ with col_h2:
 
 st.divider()
 
-# --- 3. MOTOR DE EXTRACCIÓN Y TRADUCCIÓN DE DATOS (VERSIÓN 6) ---
+# --- 3. MOTOR DE EXTRACCIÓN Y TRADUCCIÓN DE DATOS (VERSIÓN 7) ---
 @st.cache_data(ttl=86400) 
-def obtener_empresas_msci_world_v6():
+def obtener_empresas_msci_world_v7():
     url = "https://www.ishares.com/us/products/239696/ishares-msci-world-etf/1467271812596.ajax?fileType=csv&fileName=URTH_holdings&dataType=fund"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"
@@ -55,7 +63,6 @@ def obtener_empresas_msci_world_v6():
     try:
         response = requests.get(url, headers=headers)
         
-        # Búsqueda dinámica de la cabecera
         lineas = response.text.splitlines()
         header_idx = 0
         for i, linea in enumerate(lineas):
@@ -96,7 +103,7 @@ def obtener_empresas_msci_world_v6():
             ticker_upper = ticker_original.upper()
             nombre_empresa = str(row['Name']).upper()
             
-            # --- EXCEPCIONES DIRECTAS BLINDADAS ---
+            # --- EXCEPCIONES DIRECTAS ---
             if 'BERKSHIRE' in nombre_empresa:
                 tickers_adaptados.append('BRK-B')
                 continue
@@ -174,20 +181,39 @@ def obtener_empresas_msci_world_v6():
         st.error(f"Error procesando el archivo de BlackRock: {e}")
         return pd.DataFrame()
 
-# 🛡️ FIX DEFINITIVO: LECTURA SEGURA DE CABECERAS SIMPLES Y MÚLTIPLES DE YAHOO FINANCE (v6)
+# 🛡️ FIX DEFINITIVO DE DESCARGAS MASIVAS (v7)
 @st.cache_data(ttl=3600) 
-def descargar_precios_v6(tickers):
-    data = yf.download(tickers, period="4mo", auto_adjust=True, progress=False)
-    
-    if isinstance(data.columns, pd.MultiIndex):
-        if 'Close' in data.columns.get_level_values(0):
-            return data['Close']
-        elif 'Close' in data.columns.get_level_values(1):
-            return data.xs('Close', axis=1, level=1)
-    elif 'Close' in data.columns:
-        return data['Close']
+def descargar_precios_v7(tickers):
+    if not tickers:
+        return pd.DataFrame()
         
-    return data
+    # Limpiamos duplicados y evitamos bloqueos por IP desactivando hilos
+    tickers_unicos = list(set(tickers))
+    data = yf.download(tickers_unicos, period="4mo", auto_adjust=True, progress=False, threads=False)
+    
+    if data.empty:
+        return pd.DataFrame()
+        
+    try:
+        if isinstance(data.columns, pd.MultiIndex):
+            if 'Close' in data.columns.levels[0]:
+                df_close = data['Close']
+            elif 'Close' in data.columns.levels[1]:
+                df_close = data.xs('Close', axis=1, level=1)
+            else:
+                return pd.DataFrame()
+        else:
+            if 'Close' in data.columns:
+                if len(tickers_unicos) == 1:
+                    df_close = data[['Close']].rename(columns={'Close': tickers_unicos[0]})
+                else:
+                    df_close = data[['Close']]
+            else:
+                return pd.DataFrame()
+                
+        return df_close
+    except Exception:
+        return pd.DataFrame()
 
 def dar_color(val):
     if isinstance(val, (int, float)):
@@ -196,7 +222,7 @@ def dar_color(val):
     return ''
 
 # --- 4. LÓGICA DE INTERFAZ Y CÁLCULO ---
-df_msci = obtener_empresas_msci_world_v6()
+df_msci = obtener_empresas_msci_world_v7()
 
 if not df_msci.empty:
     sectores = ["Todos los Sectores"] + sorted(df_msci['GICS Sector'].unique())
@@ -216,8 +242,8 @@ if not df_msci.empty:
     nacionalidad_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Nacionalidad']))
     peso_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Peso_Global']))
     
-    with st.spinner(f"Sincronizando {len(tickers_sector)} activos globales..."):
-        precios = descargar_precios_v6(tickers_sector)
+    with st.spinner(f"Sincronizando {len(tickers_sector)} activos globales de forma segura..."):
+        precios = descargar_precios_v7(tickers_sector)
     
     if not precios.empty:
         resultados = []
@@ -229,13 +255,13 @@ if not df_msci.empty:
             
         for ticker in tickers_sector:
             if ticker not in precios.columns:
-                activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict[ticker], "País": nacionalidad_dict[ticker], "Motivo": "No encontrado en Yahoo Finance"})
+                activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict.get(ticker, ""), "País": nacionalidad_dict.get(ticker, ""), "Motivo": "Rechazado por Yahoo Finance"})
                 continue
                 
             serie = precios[ticker].dropna()
             
             if len(serie) < 51: 
-                activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict[ticker], "País": nacionalidad_dict[ticker], "Motivo": "Historial insuficiente (< 50 días)"})
+                activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict.get(ticker, ""), "País": nacionalidad_dict.get(ticker, ""), "Motivo": "Historial insuficiente (< 50 días)"})
                 continue
                 
             precio_actual = float(serie.iloc[-1])
@@ -261,7 +287,7 @@ if not df_msci.empty:
                     "50 Días": ret_50d
                 })
             except Exception:
-                activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict[ticker], "País": nacionalidad_dict[ticker], "Motivo": "Error de cálculo"})
+                activos_fallidos.append({"Ticker": ticker, "Empresa": nombres_dict.get(ticker, ""), "País": nacionalidad_dict.get(ticker, ""), "Motivo": "Error de cálculo interno"})
                 
         # --- 5. VISUALIZACIÓN DE RESULTADOS ---
         if resultados:
