@@ -196,7 +196,7 @@ def descargar_precios_optimizados(tickers):
         return pd.DataFrame()
         
     hoy = date.today().strftime("%Y-%m-%d")
-    archivo_cache = f"msci_precios_cache_{hoy}.csv"
+    archivo_cache = f"msci_precios_cache_2y_{hoy}.csv"
     
     if os.path.exists(archivo_cache):
         try:
@@ -205,7 +205,8 @@ def descargar_precios_optimizados(tickers):
             pass 
             
     tickers_unicos = list(set(tickers))
-    data = yf.download(tickers_unicos, period="6mo", auto_adjust=True, progress=False, threads=True)
+    # Ampliado a 2 años para permitir el backtest de 250 días
+    data = yf.download(tickers_unicos, period="2y", auto_adjust=True, progress=False, threads=True)
     
     if data.empty:
         return pd.DataFrame()
@@ -229,7 +230,7 @@ def descargar_precios_optimizados(tickers):
                 
         if not df_close.empty:
             for f in os.listdir():
-                if f.startswith("msci_precios_cache_") and f.endswith(".csv"):
+                if f.startswith("msci_precios_cache_2y_") and f.endswith(".csv"):
                     try:
                         os.remove(f)
                     except Exception:
@@ -372,17 +373,18 @@ else:
         st.divider()
         col_bt1, col_bt2, col_bt3 = st.columns([1, 2, 1])
         with col_bt2:
-            if st.button("⚙️ Ejecutar Backtest: Top 3 Sectores vs MSCI World (Últ. 50 días)", use_container_width=True):
+            if st.button("⚙️ Ejecutar Backtest: Top 3 Sectores vs MSCI World (Últ. 250 días)", use_container_width=True):
                 st.session_state.show_bt = not st.session_state.show_bt
                 
         if st.session_state.show_bt:
-            with st.spinner("Simulando estrategia histórica (Evaluación cada 10 días)..."):
+            with st.spinner("Simulando estrategia histórica (Evaluación cada 10 días, últimos 250 días)..."):
                 fechas = precios_largo.index
                 
-                if len(fechas) > 60:
+                # Necesitamos al menos 250 días + 10 días de la primera ventana = 260 días bursátiles
+                if len(fechas) > 260:
                     resultados_bt = []
-                    # Índices de rebalanceo exactos cada 10 días bursátiles
-                    indices_rebalanceo = [-51, -41, -31, -21, -11]
+                    # Índices de rebalanceo cada 10 días bursátiles (últimos 250 días)
+                    indices_rebalanceo = list(range(-251, -1, 10))
                     
                     for i in indices_rebalanceo:
                         fecha_inicio = fechas[i]
@@ -426,7 +428,7 @@ else:
                         retorno_top3 = (df_top3['Retorno'] * df_top3['Peso_Global']).sum() / peso_top3 if peso_top3 > 0 else 0
                         
                         resultados_bt.append({
-                            'Periodo': f"{fecha_inicio.strftime('%d/%m')} - {fecha_fin.strftime('%d/%m')}",
+                            'Periodo': f"{fecha_inicio.strftime('%d/%m/%y')} - {fecha_fin.strftime('%d/%m/%y')}",
                             'Sectores Top 3': ", ".join(top_3),
                             'Retorno Top 3': retorno_top3,
                             'Retorno MSCI': retorno_msci,
@@ -435,7 +437,7 @@ else:
                         
                     df_res_bt = pd.DataFrame(resultados_bt)
                     
-                    st.markdown("### 📊 Resultados Simulación (Ventana/Rebalanceo 10d)")
+                    st.markdown("### 📊 Resultados Simulación Anual (Ventana/Rebalanceo 10d)")
                     estilo_bt = df_res_bt.style.format({
                         'Retorno Top 3': "{:.2f} %",
                         'Retorno MSCI': "{:.2f} %",
@@ -450,10 +452,10 @@ else:
                     col_r1, col_r2, col_r3 = st.columns(3)
                     col_r1.metric("Acumulado Estrategia Top 3", f"{prod_top3:.2f} %")
                     col_r2.metric("Acumulado MSCI World", f"{prod_msci:.2f} %")
-                    col_r3.metric("Alpha Generado", f"{(prod_top3 - prod_msci):.2f} %")
+                    col_r3.metric("Alpha Generado (1 Año)", f"{(prod_top3 - prod_msci):.2f} %")
                     
                 else:
-                    st.warning("Historial insuficiente. Se necesitan 60 días para el backtesting de 50.")
+                    st.warning("Historial insuficiente. Se necesitan 261 días bursátiles para el backtesting.")
 
     # --- PANTALLA SECUNDARIA (COMPONENTES) ---
     elif st.session_state.page == 'components':
