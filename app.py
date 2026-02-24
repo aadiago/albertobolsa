@@ -44,9 +44,9 @@ with col_h2:
 
 st.divider()
 
-# --- 3. MOTOR DE EXTRACCIÓN Y TRADUCCIÓN DE DATOS (VERSIÓN 4 - BYPASS CACHÉ) ---
+# --- 3. MOTOR DE EXTRACCIÓN Y TRADUCCIÓN DE DATOS (VERSIÓN 5 - FIX EURONEXT) ---
 @st.cache_data(ttl=86400) 
-def obtener_empresas_msci_world_v4():
+def obtener_empresas_msci_world_v5():
     url = "https://www.ishares.com/us/products/239696/ishares-msci-world-etf/1467271812596.ajax?fileType=csv&fileName=URTH_holdings&dataType=fund"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"
@@ -134,9 +134,10 @@ def obtener_empresas_msci_world_v4():
             ticker_final = ticker_base
             asignado = False
             
-            # 🛡️ REGLA EE.UU: Si cotiza en bolsa americana, bloqueamos cualquier sufijo
+            # 🛡️ REGLA EE.UU CORREGIDA: Bloqueamos sufijos para bolsas americanas, 
+            # pero esquivamos la trampa de "NYSE Euronext"
             bolsas_us = ['new york', 'nasdaq', 'nyse', 'nyq', 'nms', 'united states']
-            if any(b in bolsa for b in bolsas_us):
+            if any(b in bolsa for b in bolsas_us) and 'euronext' not in bolsa:
                 ticker_final = ticker_base
                 asignado = True
             
@@ -176,12 +177,11 @@ def obtener_empresas_msci_world_v4():
         st.error(f"Error procesando el archivo de BlackRock: {e}")
         return pd.DataFrame()
 
-# ⚠️ BUSTEO DE CACHÉ PARA PRECIOS (v4)
+# ⚠️ BUSTEO DE CACHÉ PARA PRECIOS (v5)
 @st.cache_data(ttl=3600) 
-def descargar_precios_v4(tickers):
+def descargar_precios_v5(tickers):
     data = yf.download(tickers, period="4mo", auto_adjust=True, progress=False)
     
-    # Manejo seguro para nuevas versiones de yfinance
     if isinstance(data.columns, pd.MultiIndex):
         if 'Close' in data.columns.levels[0]:
             return data['Close']
@@ -196,7 +196,7 @@ def dar_color(val):
     return ''
 
 # --- 4. LÓGICA DE INTERFAZ Y CÁLCULO ---
-df_msci = obtener_empresas_msci_world_v4()
+df_msci = obtener_empresas_msci_world_v5()
 
 if not df_msci.empty:
     sectores = ["Todos los Sectores"] + sorted(df_msci['GICS Sector'].unique())
@@ -217,7 +217,7 @@ if not df_msci.empty:
     peso_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Peso_Global']))
     
     with st.spinner(f"Sincronizando {len(tickers_sector)} activos globales..."):
-        precios = descargar_precios_v4(tickers_sector)
+        precios = descargar_precios_v5(tickers_sector)
     
     if not precios.empty:
         resultados = []
