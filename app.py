@@ -104,6 +104,18 @@ def obtener_empresas_msci_world_v2():
             if ticker_original.startswith('JD') and 'JD' in nombre_empresa:
                 tickers_adaptados.append('JD.L')
                 continue
+                
+            if 'SEA' in nombre_empresa and ('LTD' in nombre_empresa or 'LIMITED' in nombre_empresa):
+                tickers_adaptados.append('SE')
+                continue
+                
+            if 'BROWN' in nombre_empresa and 'FORMAN' in nombre_empresa:
+                tickers_adaptados.append('BF-B')
+                continue
+                
+            if 'BP PLC' in nombre_empresa or (ticker_original.startswith('BP') and 'BP' in nombre_empresa):
+                tickers_adaptados.append('BP.L')
+                continue
             
             # Limpieza estándar
             ticker_base = ticker_original.replace('.', '-').replace(' ', '-').replace('/', '-')
