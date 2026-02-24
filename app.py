@@ -205,7 +205,7 @@ def descargar_precios_optimizados(tickers):
             pass 
             
     tickers_unicos = list(set(tickers))
-    # threads=False previene bloqueos del servidor (RuntimeError) en Streamlit Cloud
+    # THREADS=FALSE para evitar el RuntimeError en Streamlit Cloud
     data = yf.download(tickers_unicos, period="5y", auto_adjust=True, progress=False, threads=False)
     
     if data.empty:
@@ -247,7 +247,7 @@ def descargar_precios_tiempo_real(tickers):
         return pd.DataFrame()
         
     tickers_unicos = list(set(tickers))
-    # threads=False por la misma razón que el histórico
+    # THREADS=FALSE para evitar el RuntimeError
     data = yf.download(tickers_unicos, period="5d", auto_adjust=True, progress=False, threads=False)
     
     if data.empty:
@@ -298,7 +298,7 @@ else:
                 
         dias_analisis = int(opcion_dias.split()[0])
                 
-        with st.spinner(f"Calculando amplitud y ganancias de {dias_analisis} días en tiempo real... (Si es la primera vez hoy, puede tardar unos minutos en descargar el histórico 5Y)"):
+        with st.spinner(f"Calculando amplitud y ganancias de {dias_analisis} días... (Tardará unos minutos la primera vez al no usar multiproceso)"):
             tickers_todos = df_msci['Symbol_Yahoo'].tolist()
             precios_largo = descargar_precios_optimizados(tickers_todos)
             precios_corto = descargar_precios_tiempo_real(tickers_todos)
