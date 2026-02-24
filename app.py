@@ -196,7 +196,7 @@ def descargar_precios_optimizados(tickers):
         return pd.DataFrame()
         
     hoy = date.today().strftime("%Y-%m-%d")
-    archivo_cache = f"msci_precios_cache_2y_{hoy}.csv"
+    archivo_cache = f"msci_precios_cache_5y_{hoy}.csv"
     
     if os.path.exists(archivo_cache):
         try:
@@ -205,7 +205,8 @@ def descargar_precios_optimizados(tickers):
             pass 
             
     tickers_unicos = list(set(tickers))
-    data = yf.download(tickers_unicos, period="2y", auto_adjust=True, progress=False, threads=True)
+    # Ampliado a 5 años para asegurar datos en ventanas muy largas (252) y backtesting
+    data = yf.download(tickers_unicos, period="5y", auto_adjust=True, progress=False, threads=True)
     
     if data.empty:
         return pd.DataFrame()
@@ -229,7 +230,7 @@ def descargar_precios_optimizados(tickers):
                 
         if not df_close.empty:
             for f in os.listdir():
-                if f.startswith("msci_precios_cache_2y_") and f.endswith(".csv"):
+                if f.startswith("msci_precios_cache_") and f.endswith(".csv"):
                     try:
                         os.remove(f)
                     except Exception:
@@ -285,7 +286,7 @@ else:
             st.subheader("Amplitud y Rendimiento por Sectores")
             opcion_dias = st.selectbox(
                 "Configurar Ventana de Análisis:",
-                ["5 días", "10 días", "21 días", "42 días"],
+                ["5 días", "10 días", "21 días", "42 días", "63 días", "126 días", "252 días"],
                 index=1
             )
         with col2:
@@ -296,7 +297,7 @@ else:
                 
         dias_analisis = int(opcion_dias.split()[0])
                 
-        with st.spinner(f"Calculando amplitud y ganancias de {dias_analisis} días en tiempo real..."):
+        with st.spinner(f"Calculando amplitud y ganancias de {dias_analisis} días en tiempo real (leyendo 5 años de datos)..."):
             tickers_todos = df_msci['Symbol_Yahoo'].tolist()
             precios_largo = descargar_precios_optimizados(tickers_todos)
             precios_corto = descargar_precios_tiempo_real(tickers_todos)
@@ -374,7 +375,7 @@ else:
         with col_bt1:
             opcion_bt_dias = st.selectbox(
                 "Ventana de Backtest:",
-                ["10 días", "21 días", "42 días"],
+                ["10 días", "21 días", "42 días", "63 días", "126 días", "252 días"],
                 index=0
             )
             bt_dias = int(opcion_bt_dias.split()[0])
