@@ -44,9 +44,9 @@ with col_h2:
 
 st.divider()
 
-# --- 3. MOTOR DE EXTRACCIÓN Y TRADUCCIÓN DE DATOS (VERSIÓN 3) ---
+# --- 3. MOTOR DE EXTRACCIÓN Y TRADUCCIÓN DE DATOS (VERSIÓN 4 - BYPASS CACHÉ) ---
 @st.cache_data(ttl=86400) 
-def obtener_empresas_msci_world_v3():
+def obtener_empresas_msci_world_v4():
     url = "https://www.ishares.com/us/products/239696/ishares-msci-world-etf/1467271812596.ajax?fileType=csv&fileName=URTH_holdings&dataType=fund"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"
@@ -97,6 +97,14 @@ def obtener_empresas_msci_world_v3():
             nombre_empresa = str(row['Name']).upper()
             
             # --- EXCEPCIONES DIRECTAS BLINDADAS ---
+            if 'BERKSHIRE' in nombre_empresa:
+                tickers_adaptados.append('BRK-B')
+                continue
+                
+            if ticker_upper == 'FUTU' or 'FUTU ' in nombre_empresa:
+                tickers_adaptados.append('FUTU')
+                continue
+                
             if ticker_upper == 'SPOT':
                 tickers_adaptados.append('SPOT')
                 continue
@@ -119,19 +127,28 @@ def obtener_empresas_msci_world_v3():
             
             # --- LIMPIEZA ESTÁNDAR ---
             ticker_base = ticker_original.replace('.', '-').replace(' ', '-').replace('/', '-')
-            ticker_base = ticker_base.rstrip('-') # Fulmina guiones residuales al final
+            ticker_base = ticker_base.rstrip('-') 
             
             bolsa = str(row['Exchange']).lower()
             pais = str(row['Location']).lower()
             ticker_final = ticker_base
-            
             asignado = False
-            for mercado, sufijo in sufijos.items():
-                if mercado in bolsa:
-                    ticker_final = f"{ticker_base}{sufijo}"
-                    asignado = True
-                    break
             
+            # 🛡️ REGLA EE.UU: Si cotiza en bolsa americana, bloqueamos cualquier sufijo
+            bolsas_us = ['new york', 'nasdaq', 'nyse', 'nyq', 'nms', 'united states']
+            if any(b in bolsa for b in bolsas_us):
+                ticker_final = ticker_base
+                asignado = True
+            
+            # Asignación de sufijo local si no es americana
+            if not asignado:
+                for mercado, sufijo in sufijos.items():
+                    if mercado in bolsa:
+                        ticker_final = f"{ticker_base}{sufijo}"
+                        asignado = True
+                        break
+            
+            # Respaldo por país si la bolsa no dio pistas
             if not asignado:
                 for mercado, sufijo in sufijos.items():
                     if mercado in pais:
@@ -159,10 +176,16 @@ def obtener_empresas_msci_world_v3():
         st.error(f"Error procesando el archivo de BlackRock: {e}")
         return pd.DataFrame()
 
+# ⚠️ BUSTEO DE CACHÉ PARA PRECIOS (v4)
 @st.cache_data(ttl=3600) 
-def descargar_precios(tickers):
+def descargar_precios_v4(tickers):
     data = yf.download(tickers, period="4mo", auto_adjust=True, progress=False)
-    if 'Close' in data:
+    
+    # Manejo seguro para nuevas versiones de yfinance
+    if isinstance(data.columns, pd.MultiIndex):
+        if 'Close' in data.columns.levels[0]:
+            return data['Close']
+    elif 'Close' in data:
         return data['Close']
     return data
 
@@ -173,17 +196,15 @@ def dar_color(val):
     return ''
 
 # --- 4. LÓGICA DE INTERFAZ Y CÁLCULO ---
-df_msci = obtener_empresas_msci_world_v3()
+df_msci = obtener_empresas_msci_world_v4()
 
 if not df_msci.empty:
-    # 🌟 AÑADIDO: "Todos los Sectores" para evitar que los activos "desaparezcan" visualmente
     sectores = ["Todos los Sectores"] + sorted(df_msci['GICS Sector'].unique())
     
     col_sel, col_empty = st.columns([1, 3])
     with col_sel:
         sector_elegido = st.selectbox("🎯 Selecciona un Sector Global (MSCI World):", sectores)
     
-    # Filtro de datos según la selección
     if sector_elegido == "Todos los Sectores":
         empresas_sector = df_msci
     else:
@@ -196,7 +217,7 @@ if not df_msci.empty:
     peso_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Peso_Global']))
     
     with st.spinner(f"Sincronizando {len(tickers_sector)} activos globales..."):
-        precios = descargar_precios(tickers_sector)
+        precios = descargar_precios_v4(tickers_sector)
     
     if not precios.empty:
         resultados = []
