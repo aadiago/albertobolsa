@@ -112,39 +112,30 @@ def obtener_empresas_msci_world_v9():
             if 'CONSTELLATION SOFTWARE' in nombre_empresa:
                 tickers_adaptados.append('CSU.TO')
                 continue
-                
             if 'CAPITALAND INTEGRATED' in nombre_empresa:
                 tickers_adaptados.append('M3T.F')
                 continue
-                
             if 'BERKSHIRE' in nombre_empresa:
                 tickers_adaptados.append('BRK-B')
                 continue
-                
             if ticker_upper == 'FUTU' or 'FUTU ' in nombre_empresa:
                 tickers_adaptados.append('FUTU')
                 continue
-                
             if ticker_upper == 'SPOT':
                 tickers_adaptados.append('SPOT')
                 continue
-                
             if ticker_upper.startswith('JD') and 'JD' in nombre_empresa:
                 tickers_adaptados.append('JD.L')
                 continue
-                
             if ticker_upper == 'SE' or ('SEA' in nombre_empresa and 'LTD' in nombre_empresa):
                 tickers_adaptados.append('SE')
                 continue
-                
             if ticker_upper in ['BFB', 'BF.B', 'BF/B', 'BF B', 'BF-B', 'BF.A', 'BFA'] or 'BROWN FORMAN' in nombre_empresa:
                 tickers_adaptados.append('BF-B')
                 continue
-                
             if ticker_upper in ['HEIA', 'HEI.A', 'HEI A', 'HEI/A', 'HEI-A'] or ('HEICO' in nombre_empresa and 'CLASS A' in nombre_empresa):
                 tickers_adaptados.append('HEI-A')
                 continue
-                
             if ticker_upper in ['BP.', 'BP/', 'BP'] and ('BP' in nombre_empresa or 'BRITISH' in nombre_empresa):
                 tickers_adaptados.append('BP.L')
                 continue
@@ -212,7 +203,7 @@ def descargar_precios_optimizados(tickers):
             pass 
             
     tickers_unicos = list(set(tickers))
-    data = yf.download(tickers_unicos, period="1y", auto_adjust=True, progress=False, threads=True)
+    data = yf.download(tickers_unicos, period="6mo", auto_adjust=True, progress=False, threads=True)
     
     if data.empty:
         return pd.DataFrame()
@@ -287,15 +278,24 @@ if df_msci.empty:
 else:
     # --- PANTALLA PRINCIPAL ---
     if st.session_state.page == 'main':
-        col1, col2 = st.columns([4, 1])
+        col1, col_vacia, col2 = st.columns([2, 2, 1])
         with col1:
-            st.subheader("Resumen Sectorial MSCI World")
+            st.subheader("Amplitud de Mercado por Sectores")
+            opcion_dias = st.selectbox(
+                "Configurar Ventana de Análisis:",
+                ["5 días", "10 días", "21 días", "42 días"],
+                index=1
+            )
         with col2:
+            st.markdown("<br>", unsafe_allow_html=True)
             if st.button("📊 Ver Componentes", use_container_width=True):
                 st.session_state.page = 'components'
                 st.rerun()
                 
-        with st.spinner("Actualizando datos en tiempo real y calculando osciladores..."):
+        # Mapeo del selector a enteros
+        dias_analisis = int(opcion_dias.split()[0])
+                
+        with st.spinner(f"Analizando máximos y mínimos de {dias_analisis} días en tiempo real..."):
             tickers_todos = df_msci['Symbol_Yahoo'].tolist()
             precios_largo = descargar_precios_optimizados(tickers_todos)
             precios_corto = descargar_precios_tiempo_real(tickers_todos)
@@ -304,86 +304,56 @@ else:
                 precios_largo = precios_largo.ffill()
                 precios_corto = precios_corto.ffill()
                 
-                retornos_diarios = precios_largo.pct_change()
-                
-                datos_retornos = []
+                datos_amplitud = []
                 for ticker in tickers_todos:
                     if ticker in precios_largo.columns and ticker in precios_corto.columns:
                         serie_larga = precios_largo[ticker].dropna()
                         serie_corta = precios_corto[ticker].dropna()
                         
-                        if len(serie_larga) >= 252 and len(serie_corta) >= 2:
-                            p_act = float(serie_corta.iloc[-1])
-                            p_1d = float(serie_corta.iloc[-2])
-                            p_1m = float(serie_larga.iloc[-22])
-                            p_3m = float(serie_larga.iloc[-64])
-                            p_1y = float(serie_larga.iloc[-252])
+                        if len(serie_larga) >= dias_analisis and not serie_corta.empty:
+                            # Tomamos el precio vivo
+                            precio_vivo = float(serie_corta.iloc[-1])
                             
-                            datos_retornos.append({
+                            # Aislamos la ventana temporal configurada
+                            ventana = serie_larga.tail(dias_analisis).copy()
+                            
+                            # Sustituimos el último dato histórico por el precio vivo 
+                            # por si el histórico CSV no está del todo actualizado a la hora actual
+                            ventana.iloc[-1] = precio_vivo 
+                            
+                            max_ventana = ventana.max()
+                            min_ventana = ventana.min()
+                            
+                            es_max = 1 if precio_vivo >= max_ventana else 0
+                            es_min = 1 if precio_vivo <= min_ventana else 0
+                            
+                            datos_amplitud.append({
                                 'Symbol_Yahoo': ticker,
-                                '1 Día': ((p_act / p_1d) - 1) * 100,
-                                '1 Mes': ((p_act / p_1m) - 1) * 100,
-                                '3 Meses': ((p_act / p_3m) - 1) * 100,
-                                '1 Año': ((p_act / p_1y) - 1) * 100
+                                'Maximos': es_max,
+                                'Minimos': es_min
                             })
                             
-                df_retornos = pd.DataFrame(datos_retornos)
-                df_completo = pd.merge(df_msci, df_retornos, on='Symbol_Yahoo')
-                
-                def promedio_ponderado(group, col):
-                    if group['Peso_Global'].sum() == 0: return 0
-                    return (group[col] * group['Peso_Global']).sum() / group['Peso_Global'].sum()
+                df_amplitud = pd.DataFrame(datos_amplitud)
+                df_completo = pd.merge(df_msci, df_amplitud, on='Symbol_Yahoo')
                 
                 resumen_sectores = []
                 for sector, group in df_completo.groupby('GICS Sector'):
-                    # --- CÁLCULO OSCILADOR MCCLELLAN E HISTÓRICO ---
-                    tickers_del_sector = group['Symbol_Yahoo'].tolist()
-                    tickers_validos_mcc = [t for t in tickers_del_sector if t in retornos_diarios.columns]
-                    
-                    if tickers_validos_mcc:
-                        retornos_sector = retornos_diarios[tickers_validos_mcc]
-                        avances = (retornos_sector > 0).sum(axis=1)
-                        retrocesos = (retornos_sector < 0).sum(axis=1)
-                        avances_netos = avances - retrocesos
-                        
-                        ema19 = avances_netos.ewm(span=19, adjust=False).mean()
-                        ema39 = avances_netos.ewm(span=39, adjust=False).mean()
-                        ema_diff = ema19 - ema39
-                        
-                        mcc_hoy = ema_diff.iloc[-1] if len(ema_diff) >= 1 else 0.0
-                        mcc_10d = ema_diff.iloc[-11] if len(ema_diff) >= 11 else 0.0
-                        mcc_21d = ema_diff.iloc[-22] if len(ema_diff) >= 22 else 0.0
-                        mcc_42d = ema_diff.iloc[-43] if len(ema_diff) >= 43 else 0.0
-                    else:
-                        mcc_hoy = mcc_10d = mcc_21d = mcc_42d = 0.0
+                    total_maximos = group['Maximos'].sum()
+                    total_minimos = group['Minimos'].sum()
+                    diferencia_neta = total_maximos - total_minimos
                     
                     resumen_sectores.append({
                         'Sector': sector,
                         'Peso (%)': group['Peso_Global'].sum(),
-                        'McClellan Hoy': mcc_hoy,
-                        'McClellan -10d': mcc_10d,
-                        'McClellan -21d': mcc_21d,
-                        'McClellan -42d': mcc_42d,
-                        '1 Día': promedio_ponderado(group, '1 Día'),
-                        '1 Mes': promedio_ponderado(group, '1 Mes'),
-                        '3 Meses': promedio_ponderado(group, '3 Meses'),
-                        '1 Año': promedio_ponderado(group, '1 Año')
+                        f'Dif. Neta ({opcion_dias})': diferencia_neta
                     })
                     
                 df_resumen = pd.DataFrame(resumen_sectores).sort_values(by='Peso (%)', ascending=False)
                 
-                # Visualización Principal a ancho completo
                 st.markdown("<br>", unsafe_allow_html=True)
                 estilo_resumen = df_resumen.style.format({
                                                      "Peso (%)": "{:.2f} %",
-                                                     "McClellan Hoy": "{:.2f}",
-                                                     "McClellan -10d": "{:.2f}",
-                                                     "McClellan -21d": "{:.2f}",
-                                                     "McClellan -42d": "{:.2f}",
-                                                     "1 Día": "{:.2f} %",
-                                                     "1 Mes": "{:.2f} %",
-                                                     "3 Meses": "{:.2f} %",
-                                                     "1 Año": "{:.2f} %"
+                                                     f'Dif. Neta ({opcion_dias})': "{:.0f}"
                                                  })
                 st.dataframe(estilo_resumen, use_container_width=True, hide_index=True, height=480)
 
