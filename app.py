@@ -44,9 +44,9 @@ with col_h2:
 
 st.divider()
 
-# --- 3. MOTOR DE EXTRACCIÓN Y TRADUCCIÓN DE DATOS ---
+# --- 3. MOTOR DE EXTRACCIÓN Y TRADUCCIÓN DE DATOS (VERSIÓN 3) ---
 @st.cache_data(ttl=86400) 
-def obtener_empresas_msci_world_v2():
+def obtener_empresas_msci_world_v3():
     url = "https://www.ishares.com/us/products/239696/ishares-msci-world-etf/1467271812596.ajax?fileType=csv&fileName=URTH_holdings&dataType=fund"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"
@@ -77,7 +77,6 @@ def obtener_empresas_msci_world_v2():
         df = df.dropna(subset=['Ticker', 'Sector'])
         df = df[df['Asset Class'] == 'Equity']
         
-        # Traductor de Bolsas a Nomenclatura Yahoo Finance
         sufijos = {
             'london': '.L', 'tokyo': '.T', 'toronto': '.TO', 'amsterdam': '.AS',
             'paris': '.PA', 'brussels': '.BR', 'belgium': '.BR', 'lisbon': '.LS',
@@ -94,43 +93,38 @@ def obtener_empresas_msci_world_v2():
         tickers_adaptados = []
         for _, row in df.iterrows():
             ticker_original = str(row['Ticker']).strip()
+            ticker_upper = ticker_original.upper()
             nombre_empresa = str(row['Name']).upper()
             
-            # --- EXCEPCIONES DIRECTAS ---
-            if ticker_original == 'SPOT':
+            # --- EXCEPCIONES DIRECTAS BLINDADAS ---
+            if ticker_upper == 'SPOT':
                 tickers_adaptados.append('SPOT')
                 continue
                 
-            if ticker_original.startswith('JD') and 'JD' in nombre_empresa:
+            if ticker_upper.startswith('JD') and 'JD' in nombre_empresa:
                 tickers_adaptados.append('JD.L')
                 continue
                 
-            # Regla agresiva para Sea Limited
-            if 'SEA' in nombre_empresa and ('LTD' in nombre_empresa or 'LIMITED' in nombre_empresa or ticker_original == 'SE'):
+            if ticker_upper == 'SE' or ('SEA' in nombre_empresa and 'LTD' in nombre_empresa):
                 tickers_adaptados.append('SE')
                 continue
                 
-            # Regla agresiva para Brown-Forman
-            if 'BROWN FORMAN' in nombre_empresa or 'BROWN-FORMAN' in nombre_empresa:
+            if ticker_upper in ['BF.B', 'BF/B', 'BF B', 'BF-B', 'BF.A']:
                 tickers_adaptados.append('BF-B')
                 continue
                 
-            if 'BP PLC' in nombre_empresa or (ticker_original.startswith('BP') and 'BP' in nombre_empresa):
+            if ticker_upper in ['BP.', 'BP/', 'BP'] and ('BP' in nombre_empresa or 'BRITISH' in nombre_empresa):
                 tickers_adaptados.append('BP.L')
                 continue
             
-            # --- LIMPIEZA ESTÁNDAR MEJORADA ---
-            # 1. Cambiamos puntos, espacios y barras por guiones
+            # --- LIMPIEZA ESTÁNDAR ---
             ticker_base = ticker_original.replace('.', '-').replace(' ', '-').replace('/', '-')
-            
-            # 2. FULMINAMOS guiones residuales a la derecha (evita que JD. se convierta en JD-.L)
-            ticker_base = ticker_base.rstrip('-')
+            ticker_base = ticker_base.rstrip('-') # Fulmina guiones residuales al final
             
             bolsa = str(row['Exchange']).lower()
             pais = str(row['Location']).lower()
             ticker_final = ticker_base
             
-            # Asignación de sufijo
             asignado = False
             for mercado, sufijo in sufijos.items():
                 if mercado in bolsa:
@@ -144,7 +138,7 @@ def obtener_empresas_msci_world_v2():
                         ticker_final = f"{ticker_base}{sufijo}"
                         break
             
-            # --- POST-PROCESADO: HONG KONG ---
+            # --- POST-PROCESADO HONG KONG ---
             if ticker_final.endswith('.HK'):
                 base_hk = ticker_final.replace('.HK', '')
                 ticker_final = f"{base_hk.zfill(4)}.HK"
@@ -179,23 +173,29 @@ def dar_color(val):
     return ''
 
 # --- 4. LÓGICA DE INTERFAZ Y CÁLCULO ---
-df_msci = obtener_empresas_msci_world_v2()
+df_msci = obtener_empresas_msci_world_v3()
 
 if not df_msci.empty:
-    sectores = sorted(df_msci['GICS Sector'].unique())
+    # 🌟 AÑADIDO: "Todos los Sectores" para evitar que los activos "desaparezcan" visualmente
+    sectores = ["Todos los Sectores"] + sorted(df_msci['GICS Sector'].unique())
     
     col_sel, col_empty = st.columns([1, 3])
     with col_sel:
         sector_elegido = st.selectbox("🎯 Selecciona un Sector Global (MSCI World):", sectores)
     
-    empresas_sector = df_msci[df_msci['GICS Sector'] == sector_elegido]
+    # Filtro de datos según la selección
+    if sector_elegido == "Todos los Sectores":
+        empresas_sector = df_msci
+    else:
+        empresas_sector = df_msci[df_msci['GICS Sector'] == sector_elegido]
+        
     tickers_sector = empresas_sector['Symbol_Yahoo'].tolist()
     
     nombres_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Security']))
     nacionalidad_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Nacionalidad']))
     peso_dict = dict(zip(empresas_sector['Symbol_Yahoo'], empresas_sector['Peso_Global']))
     
-    with st.spinner(f"Sincronizando {len(tickers_sector)} activos globales de {sector_elegido}..."):
+    with st.spinner(f"Sincronizando {len(tickers_sector)} activos globales..."):
         precios = descargar_precios(tickers_sector)
     
     if not precios.empty:
@@ -230,6 +230,7 @@ if not df_msci.empty:
                     "Ticker": ticker,
                     "Empresa": nombres_dict[ticker],
                     "Nacionalidad": nacionalidad_dict[ticker],
+                    "Sector": empresas_sector.loc[empresas_sector['Symbol_Yahoo'] == ticker, 'GICS Sector'].values[0],
                     "Peso Global": peso_dict[ticker],
                     "Precio Actual": precio_actual,
                     "1 Día": ret_1d,
