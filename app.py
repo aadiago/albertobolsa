@@ -280,7 +280,7 @@ else:
     if st.session_state.page == 'main':
         col1, col_vacia, col2 = st.columns([2, 2, 1])
         with col1:
-            st.subheader("Amplitud de Mercado por Sectores")
+            st.subheader("Amplitud y Rendimiento por Sectores")
             opcion_dias = st.selectbox(
                 "Configurar Ventana de Análisis:",
                 ["5 días", "10 días", "21 días", "42 días"],
@@ -295,7 +295,7 @@ else:
         # Mapeo del selector a enteros
         dias_analisis = int(opcion_dias.split()[0])
                 
-        with st.spinner(f"Analizando máximos y mínimos de {dias_analisis} días en tiempo real..."):
+        with st.spinner(f"Calculando amplitud y ganancias de {dias_analisis} días en tiempo real..."):
             tickers_todos = df_msci['Symbol_Yahoo'].tolist()
             precios_largo = descargar_precios_optimizados(tickers_todos)
             precios_corto = descargar_precios_tiempo_real(tickers_todos)
@@ -311,14 +311,16 @@ else:
                         serie_corta = precios_corto[ticker].dropna()
                         
                         if len(serie_larga) >= dias_analisis and not serie_corta.empty:
-                            # Tomamos el precio vivo
+                            # Tomamos el precio en tiempo real
                             precio_vivo = float(serie_corta.iloc[-1])
                             
-                            # Aislamos la ventana temporal configurada
-                            ventana = serie_larga.tail(dias_analisis).copy()
+                            # Identificamos el precio base (de hace 'X' días) para calcular las ganancias
+                            idx_base = -(dias_analisis + 1) if len(serie_larga) >= (dias_analisis + 1) else 0
+                            precio_base = float(serie_larga.iloc[idx_base])
+                            retorno_periodo = ((precio_vivo / precio_base) - 1) * 100
                             
-                            # Sustituimos el último dato histórico por el precio vivo 
-                            # por si el histórico CSV no está del todo actualizado a la hora actual
+                            # Aislamos la ventana temporal para máximos/mínimos
+                            ventana = serie_larga.tail(dias_analisis).copy()
                             ventana.iloc[-1] = precio_vivo 
                             
                             max_ventana = ventana.max()
@@ -330,22 +332,29 @@ else:
                             datos_amplitud.append({
                                 'Symbol_Yahoo': ticker,
                                 'Maximos': es_max,
-                                'Minimos': es_min
+                                'Minimos': es_min,
+                                'Retorno': retorno_periodo
                             })
                             
                 df_amplitud = pd.DataFrame(datos_amplitud)
                 df_completo = pd.merge(df_msci, df_amplitud, on='Symbol_Yahoo')
+                
+                def promedio_ponderado(group, col):
+                    if group['Peso_Global'].sum() == 0: return 0
+                    return (group[col] * group['Peso_Global']).sum() / group['Peso_Global'].sum()
                 
                 resumen_sectores = []
                 for sector, group in df_completo.groupby('GICS Sector'):
                     total_maximos = group['Maximos'].sum()
                     total_minimos = group['Minimos'].sum()
                     diferencia_neta = total_maximos - total_minimos
+                    retorno_sector = promedio_ponderado(group, 'Retorno')
                     
                     resumen_sectores.append({
                         'Sector': sector,
                         'Peso (%)': group['Peso_Global'].sum(),
-                        f'Dif. Neta ({opcion_dias})': diferencia_neta
+                        f'Dif. Neta ({opcion_dias})': diferencia_neta,
+                        f'Rendimiento ({opcion_dias})': retorno_sector
                     })
                     
                 df_resumen = pd.DataFrame(resumen_sectores).sort_values(by='Peso (%)', ascending=False)
@@ -353,7 +362,8 @@ else:
                 st.markdown("<br>", unsafe_allow_html=True)
                 estilo_resumen = df_resumen.style.format({
                                                      "Peso (%)": "{:.2f} %",
-                                                     f'Dif. Neta ({opcion_dias})': "{:.0f}"
+                                                     f'Dif. Neta ({opcion_dias})': "{:.0f}",
+                                                     f'Rendimiento ({opcion_dias})': "{:.2f} %"
                                                  })
                 st.dataframe(estilo_resumen, use_container_width=True, hide_index=True, height=480)
 
