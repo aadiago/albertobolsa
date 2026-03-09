@@ -15,7 +15,6 @@ with st.sidebar:
     st.markdown("*(Los pesos de las secciones se configuran en el código fuente)*")
 
 st.markdown("### 🌍 Monitor de Estrategia de Rotación Multisección")
-st.write("Si ves que los mensajes de abajo avanzan, el programa NO está colapsado.")
 
 # --- 2. PARÁMETROS MAESTROS Y DICCIONARIOS ---
 BENCHMARK = "SXR8.DE"
@@ -46,34 +45,31 @@ def descargar_datos_seguro():
     bar = st.progress(0)
     
     for i, ticker in enumerate(TODOS_ACTIVOS):
-        status.info(f"⏳ Procesando activo {i+1}/{len(TODOS_ACTIVOS)}: {ticker}")
+        status.info(f"⏳ Descargando base de datos ({i+1}/{len(TODOS_ACTIVOS)}): {ticker}")
         try:
             ticker_obj = yf.Ticker(ticker)
             historial = ticker_obj.history(start="2005-01-01")
             if not historial.empty:
                 df_result[ticker] = historial['Close']
-            time.sleep(0.3) 
-        except Exception as e:
-            st.error(f"Aviso: No se pudo descargar {ticker}")
+            time.sleep(0.1) 
+        except Exception:
+            pass # Ignoramos errores silenciosamente para no saturar la UI
             
         bar.progress((i + 1) / len(TODOS_ACTIVOS))
         
-    status.success("✅ ¡Sincronización completa!")
-    time.sleep(1) 
     status.empty()
     bar.empty()
     return df_result.ffill().bfill()
 
-# --- 4. EJECUCIÓN DIRECTA ---
-precios = descargar_datos_seguro()
-
-if not precios.empty:
-    inicio_real = precios.apply(lambda x: x.first_valid_index()).max()
-    sma_vals = precios.rolling(window=sma_filtro).mean()
+# --- 4. MOTOR MATEMÁTICO CACHEADO (EVITA LENTITUD) ---
+@st.cache_data
+def ejecutar_backtest(df_precios, lb, freq, sma_f):
+    inicio_real = df_precios.apply(lambda x: x.first_valid_index()).max()
+    sma_vals = df_precios.rolling(window=sma_f).mean()
     
-    indices_bt = precios.loc[inicio_real:].index
-    dias_reb = indices_bt[::freq_reb]
-    retornos_diarios = precios.pct_change(fill_method=None).fillna(0)
+    indices_bt = df_precios.loc[inicio_real:].index
+    dias_reb = indices_bt[::freq]
+    retornos_diarios = df_precios.pct_change(fill_method=None).fillna(0)
     ret_est = pd.Series(0.0, index=indices_bt)
     registro_completo = []
     
@@ -83,32 +79,33 @@ if not precios.empty:
         elecciones_periodo = {}
         
         for nom, conf in SECCIONES.items():
-            # ESCUDO ANTI-KEYERROR: Solo usamos los activos que realmente están en el DataFrame
-            activos_disp = [t for t in conf['activos'] if t in precios.columns]
+            activos_disp = [t for t in conf['activos'] if t in df_precios.columns]
             
             if not activos_disp:
                 elecciones_periodo[nom] = "Refugio (BIL)"
-                ret_est.loc[f_ini:f_fin] += retornos_diarios.loc[f_ini:f_fin, "BIL"] * conf['peso'] if "BIL" in precios.columns else 0
+                if "BIL" in df_precios.columns:
+                    ret_est.loc[f_ini:f_fin] += retornos_diarios.loc[f_ini:f_fin, "BIL"] * conf['peso']
                 continue
 
-            ventana = precios.loc[:f_ini, activos_disp].tail(lookback + 1)
+            ventana = df_precios.loc[:f_ini, activos_disp].tail(lb + 1)
             v_rets = ventana.pct_change(fill_method=None).dropna()
-            mu, sigma = v_rets.mean(), v_rets.std()
+            
+            mu = v_rets.mean()
+            sigma = v_rets.std()
+            # Evitar divisiones por cero
             sharpe = (mu / sigma).replace([np.inf, -np.inf], 0).fillna(0) * np.sqrt(252)
             rent_10d = (ventana.iloc[-1] / ventana.iloc[0]) - 1
             
-            validos = [t for t in activos_disp if rent_10d[t] > 0 and precios.loc[f_ini, t] > sma_vals.loc[f_ini, t]]
-            ganador = sharpe[validos].idxmax() if validos else ("BIL" if "BIL" in precios.columns else activos_disp[0])
+            validos = [t for t in activos_disp if rent_10d[t] > 0 and df_precios.loc[f_ini, t] > sma_vals.loc[f_ini, t]]
+            ganador = sharpe[validos].idxmax() if validos else ("BIL" if "BIL" in df_precios.columns else activos_disp[0])
             
             elecciones_periodo[nom] = TRADUCCION.get(ganador, ganador)
-            # Acumulamos el retorno si el ganador está en los datos
             if ganador in retornos_diarios.columns:
                 ret_est.loc[f_ini:f_fin] += retornos_diarios.loc[f_ini:f_fin, ganador] * conf['peso']
             
         registro_completo.append({"Fecha": f_ini.strftime('%Y-%m-%d'), **elecciones_periodo})
 
-    # --- 5. RESULTADOS Y MÉTRICAS ---
-    # Verificamos que el Benchmark esté disponible para comparativas
+    # CÁLCULO DE MÉTRICAS ALINEADAS (BASE 100)
     bench_valido = BENCHMARK if BENCHMARK in retornos_diarios.columns else retornos_diarios.columns[0]
     
     df_res = pd.DataFrame({
@@ -116,12 +113,44 @@ if not precios.empty:
         'Benchmark': (1 + retornos_diarios.loc[ret_est.index, bench_valido]).cumprod()
     })
     
+    # FORZAR A QUE AMBOS EMPIECEN EXACTAMENTE EN 100 EN EL DÍA 1
+    df_res = (df_res / df_res.iloc[0]) * 100
+    
     dd_est = (df_res['Estrategia'] - df_res['Estrategia'].cummax()) / df_res['Estrategia'].cummax()
     dd_bench = (df_res['Benchmark'] - df_res['Benchmark'].cummax()) / df_res['Benchmark'].cummax()
     
-    cagr_est = (df_res['Estrategia'].iloc[-1]**(252/len(df_res))-1)
+    cagr_est = ((df_res['Estrategia'].iloc[-1] / 100) ** (252/len(df_res)) - 1)
     ulcer_est = np.sqrt(np.mean(dd_est**2))
     mdd_est = dd_est.min()
+    
+    df_bitacora = pd.DataFrame(registro_completo).set_index("Fecha")
+    
+    # DATOS DE HOY
+    hoy = df_precios.index[-1]
+    res_hoy = {}
+    for nom, conf in SECCIONES.items():
+        activos_disp_hoy = [t for t in conf['activos'] if t in df_precios.columns]
+        if not activos_disp_hoy:
+            res_hoy[nom] = "Sin datos"
+            continue
+        v_h = df_precios[activos_disp_hoy].tail(lb + 1)
+        r_h = (v_h.iloc[-1] / v_h.iloc[0]) - 1
+        val_h = [t for t in activos_disp_hoy if r_h[t] > 0 and df_precios.loc[hoy, t] > sma_vals.loc[hoy, t]]
+        if not val_h: 
+            res_hoy[nom] = "Refugio (BIL)"
+        else:
+            v_rets_h = v_h.pct_change(fill_method=None).dropna()
+            sh_h = (v_rets_h.mean() / v_rets_h.std()).fillna(0) * np.sqrt(252)
+            res_hoy[nom] = TRADUCCION.get(sh_h[val_h].idxmax(), sh_h[val_h].idxmax())
+
+    return df_res, df_bitacora, dd_est, dd_bench, cagr_est, ulcer_est, mdd_est, res_hoy, hoy
+
+# --- 5. RENDERIZADO PRINCIPAL ---
+precios = descargar_datos_seguro()
+
+if not precios.empty:
+    # Llamamos a la función cacheada. Si cambias los filtros en la barra lateral, solo recula esto.
+    df_res, df_bitacora, dd_est, dd_bench, cagr_est, ulcer_est, mdd_est, res_hoy, hoy = ejecutar_backtest(precios, lookback, freq_reb, sma_filtro)
 
     st.markdown("### 📊 Métricas de Rendimiento")
     c1, c2, c3 = st.columns(3)
@@ -129,7 +158,7 @@ if not precios.empty:
     c2.metric("Ulcer Index", f"{ulcer_est:.2%}")
     c3.metric("Max Drawdown", f"{mdd_est:.2%}")
 
-    st.markdown("### 📈 Crecimiento vs Benchmark")
+    st.markdown("### 📈 Crecimiento vs Benchmark (Base 100)")
     df_chart = df_res.copy()
     df_chart.index = df_chart.index.tz_localize(None) 
     st.line_chart(df_chart)
@@ -139,37 +168,14 @@ if not precios.empty:
     df_dd.index = df_dd.index.tz_localize(None)
     st.line_chart(df_dd)
 
-    # SELECCIÓN HIPOTÉTICA PARA HOY
-    hoy = precios.index[-1]
     st.markdown(f"### 🎯 Selección Hipotética para Hoy ({hoy.strftime('%Y-%m-%d')})")
     cols_hoy = st.columns(len(SECCIONES))
-    
-    for idx, (nom, conf) in enumerate(SECCIONES.items()):
-        activos_disp_hoy = [t for t in conf['activos'] if t in precios.columns]
-        
-        if not activos_disp_hoy:
-            cols_hoy[idx].info(f"**{nom}**\n\nSin datos disponibles")
-            continue
+    for idx, (nom, resultado) in enumerate(res_hoy.items()):
+        cols_hoy[idx].info(f"**{nom}**\n\n{resultado}")
 
-        v_h = precios[activos_disp_hoy].tail(lookback + 1)
-        r_h = (v_h.iloc[-1] / v_h.iloc[0]) - 1
-        val_h = [t for t in activos_disp_hoy if r_h[t] > 0 and precios.loc[hoy, t] > sma_vals.loc[hoy, t]]
-        
-        if not val_h: 
-            res = "Refugio (BIL)"
-        else:
-            v_rets_h = v_h.pct_change(fill_method=None).dropna()
-            sh_h = (v_rets_h.mean() / v_rets_h.std()).fillna(0) * np.sqrt(252)
-            res = TRADUCCION.get(sh_h[val_h].idxmax(), sh_h[val_h].idxmax())
-            
-        cols_hoy[idx].info(f"**{nom}**\n\n{res}")
-
-    # BITÁCORA Y EXPORTACIÓN
     st.markdown("### 📓 Historial de Asignación")
-    df_bitacora = pd.DataFrame(registro_completo).set_index("Fecha")
     st.dataframe(df_bitacora, use_container_width=True)
     
-    # Descarga para trabajar en hojas de cálculo
     csv = df_bitacora.to_csv().encode('utf-8')
     st.download_button(
         label="📥 Descargar Historial (CSV)",
@@ -177,6 +183,5 @@ if not precios.empty:
         file_name='historial_rotacion.csv',
         mime='text/csv',
     )
-
 else:
     st.error("No se pudieron obtener datos. Revisa tu conexión a internet o los tickers proporcionados.")
