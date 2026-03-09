@@ -14,8 +14,6 @@ with st.sidebar:
     sma_filtro = st.number_input("Filtro SMA (días)", min_value=10, value=100)
     st.markdown("*(Los pesos de las secciones se configuran en el código fuente)*")
 
-st.markdown("### 🌍 Monitor de Estrategia de Rotación Multisección")
-
 # --- 2. PARÁMETROS MAESTROS Y DICCIONARIOS ---
 BENCHMARK = "SXR8.DE"
 
@@ -53,21 +51,26 @@ def descargar_datos_seguro():
                 df_result[ticker] = historial['Close']
             time.sleep(0.1) 
         except Exception:
-            pass # Ignoramos errores silenciosamente para no saturar la UI
+            pass 
             
         bar.progress((i + 1) / len(TODOS_ACTIVOS))
         
     status.empty()
     bar.empty()
-    return df_result.ffill().bfill()
+    # Se elimina .bfill() para no arrastrar el inicio de los activos jóvenes al 2005
+    return df_result.ffill() 
 
-# --- 4. MOTOR MATEMÁTICO CACHEADO (EVITA LENTITUD) ---
+# --- 4. MOTOR MATEMÁTICO CACHEADO ---
 @st.cache_data
 def ejecutar_backtest(df_precios, lb, freq, sma_f):
+    # Encontrar la fecha real donde todos los activos ya existen
     inicio_real = df_precios.apply(lambda x: x.first_valid_index()).max()
+    
+    # Recortamos la base de datos para que empiece en la fecha correcta (~2016)
+    df_precios = df_precios.loc[inicio_real:].copy()
     sma_vals = df_precios.rolling(window=sma_f).mean()
     
-    indices_bt = df_precios.loc[inicio_real:].index
+    indices_bt = df_precios.index
     dias_reb = indices_bt[::freq]
     retornos_diarios = df_precios.pct_change(fill_method=None).fillna(0)
     ret_est = pd.Series(0.0, index=indices_bt)
@@ -92,7 +95,6 @@ def ejecutar_backtest(df_precios, lb, freq, sma_f):
             
             mu = v_rets.mean()
             sigma = v_rets.std()
-            # Evitar divisiones por cero
             sharpe = (mu / sigma).replace([np.inf, -np.inf], 0).fillna(0) * np.sqrt(252)
             rent_10d = (ventana.iloc[-1] / ventana.iloc[0]) - 1
             
@@ -105,7 +107,6 @@ def ejecutar_backtest(df_precios, lb, freq, sma_f):
             
         registro_completo.append({"Fecha": f_ini.strftime('%Y-%m-%d'), **elecciones_periodo})
 
-    # CÁLCULO DE MÉTRICAS ALINEADAS (BASE 100)
     bench_valido = BENCHMARK if BENCHMARK in retornos_diarios.columns else retornos_diarios.columns[0]
     
     df_res = pd.DataFrame({
@@ -113,7 +114,7 @@ def ejecutar_backtest(df_precios, lb, freq, sma_f):
         'Benchmark': (1 + retornos_diarios.loc[ret_est.index, bench_valido]).cumprod()
     })
     
-    # FORZAR A QUE AMBOS EMPIECEN EXACTAMENTE EN 100 EN EL DÍA 1
+    # Ambos parten de 100 el primer día real de la estrategia
     df_res = (df_res / df_res.iloc[0]) * 100
     
     dd_est = (df_res['Estrategia'] - df_res['Estrategia'].cummax()) / df_res['Estrategia'].cummax()
@@ -125,7 +126,6 @@ def ejecutar_backtest(df_precios, lb, freq, sma_f):
     
     df_bitacora = pd.DataFrame(registro_completo).set_index("Fecha")
     
-    # DATOS DE HOY
     hoy = df_precios.index[-1]
     res_hoy = {}
     for nom, conf in SECCIONES.items():
@@ -149,7 +149,6 @@ def ejecutar_backtest(df_precios, lb, freq, sma_f):
 precios = descargar_datos_seguro()
 
 if not precios.empty:
-    # Llamamos a la función cacheada. Si cambias los filtros en la barra lateral, solo recula esto.
     df_res, df_bitacora, dd_est, dd_bench, cagr_est, ulcer_est, mdd_est, res_hoy, hoy = ejecutar_backtest(precios, lookback, freq_reb, sma_filtro)
 
     st.markdown("### 📊 Métricas de Rendimiento")
@@ -174,7 +173,8 @@ if not precios.empty:
         cols_hoy[idx].info(f"**{nom}**\n\n{resultado}")
 
     st.markdown("### 📓 Historial de Asignación")
-    st.dataframe(df_bitacora, use_container_width=True)
+    # Altura limitada a 400px para que el navegador no colapse al hacer scroll
+    st.dataframe(df_bitacora, use_container_width=True, height=400)
     
     csv = df_bitacora.to_csv().encode('utf-8')
     st.download_button(
